@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import Editor from '@monaco-editor/react';
 import bgImage from '../assets/bg.jpg';
 
-const CODE_SNIPPET = `const orderService = require('./orderService');
+const DEMO_SEGMENTS = [
+  {
+    code: `const orderService = require('./orderService');
 
 // BUG: Missing idempotency check
 async function createOrder(req, res) {
@@ -10,57 +13,140 @@ async function createOrder(req, res) {
     items:  req.body.items,
   });
   return res.json({ orderId: order.id });
-}`;
+}`,
+    popup: "What's happening inside that catch block?",
+    response: "The catch block is creating a second order. That's the duplicate.",
+  },
+  {
+    code: `
 
-const TOKEN_COLORS = {
-  keyword: '#ff79c6',
-  string: '#f1fa8c',
-  comment: '#6272a4',
-  fn: '#50fa7b',
-  punctuation: '#f8f8f2',
-  prop: '#8be9fd',
-  default: '#f8f8f2',
-};
 
-function CodeLine({ lineNumber, tokens }) {
-  return (
-    <div style={{ display: 'flex', gap: 16, minHeight: 20 }}>
-      <span style={{ color: '#444', minWidth: 16, textAlign: 'right', userSelect: 'none', fontSize: 12 }}>
-        {lineNumber}
-      </span>
-      <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
-        {tokens.map((t, i) => (
-          <span key={i} style={{ color: TOKEN_COLORS[t.type] || TOKEN_COLORS.default }}>{t.text}</span>
-        ))}
-      </span>
-    </div>
-  );
-}
+// Adding idempotency key validation
+  const key = req.headers['x-idempotency-key'];
+  if (!key) {
+    return res.status(400).json({ error: 'Idempotency key required' });
+  }`,
+    popup: "Walk me through why you'd add that check.",
+    response: "Without it, the same request retried twice would create two orders.",
+  },
+  {
+    code: `
 
-const CODE_LINES = [
-  [{ type: 'keyword', text: 'const ' }, { type: 'prop', text: 'orderService' }, { type: 'default', text: ' = ' }, { type: 'fn', text: 'require' }, { type: 'punctuation', text: '(' }, { type: 'string', text: "'./orderService'" }, { type: 'punctuation', text: ');' }],
-  [],
-  [{ type: 'comment', text: '// BUG: Missing idempotency check' }],
-  [{ type: 'keyword', text: 'async ' }, { type: 'keyword', text: 'function ' }, { type: 'fn', text: 'createOrder' }, { type: 'punctuation', text: '(req, res) {' }],
-  [{ type: 'keyword', text: '  const ' }, { type: 'prop', text: 'order' }, { type: 'default', text: ' = ' }, { type: 'keyword', text: 'await ' }, { type: 'prop', text: 'orderService' }, { type: 'punctuation', text: '.' }, { type: 'fn', text: 'create' }, { type: 'punctuation', text: '({' }],
-  [{ type: 'prop', text: '    userId' }, { type: 'punctuation', text: ': ' }, { type: 'prop', text: 'req' }, { type: 'punctuation', text: '.' }, { type: 'prop', text: 'user' }, { type: 'punctuation', text: '.' }, { type: 'prop', text: 'id' }, { type: 'punctuation', text: ',' }],
-  [{ type: 'prop', text: '    items' }, { type: 'punctuation', text: ':  ' }, { type: 'prop', text: 'req' }, { type: 'punctuation', text: '.' }, { type: 'prop', text: 'body' }, { type: 'punctuation', text: '.' }, { type: 'prop', text: 'items' }, { type: 'punctuation', text: ',' }],
-  [{ type: 'punctuation', text: '  });' }],
-  [{ type: 'keyword', text: '  return ' }, { type: 'prop', text: 'res' }, { type: 'punctuation', text: '.' }, { type: 'fn', text: 'json' }, { type: 'punctuation', text: '({ ' }, { type: 'prop', text: 'orderId' }, { type: 'punctuation', text: ': ' }, { type: 'prop', text: 'order' }, { type: 'punctuation', text: '.' }, { type: 'prop', text: 'id' }, { type: 'punctuation', text: ' });' }],
-  [{ type: 'punctuation', text: '}' }],
+  const existing = await orderService.findByKey(key);
+  if (existing) {
+    return res.json({ orderId: existing.id, duplicate: true });
+  }`,
+    popup: "What if two requests arrive at the exact same time?",
+    response: "We'd need a lock or transaction to handle that race condition.",
+  },
+  {
+    code: `
+
+  await db.transaction(async (trx) => {
+    const order = await orderService.create({
+      userId: req.user.id,
+      items: req.body.items,
+      idempotencyKey: key,
+    }, trx);
+    return res.json({ orderId: order.id });
+  });
+}`,
+    popup: "How would you test this under concurrent load?",
+    response: "Send parallel requests with the same key, assert only one order is created.",
+  },
 ];
 
+const liquidGlass = {
+  background: 'rgba(255,255,255,0.06)',
+  backdropFilter: 'blur(40px) saturate(180%)',
+  WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+  border: '1px solid rgba(255,255,255,0.18)',
+  boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12)',
+  borderRadius: 12,
+  padding: '12px 14px',
+};
+
 export default function Landing({ scenarios, onStart }) {
-  const [selected, setSelected] = useState(scenarios[0]);
+  const [selected] = useState(scenarios[0]);
+  const [editorCode, setEditorCode] = useState('');
+  const [popup, setPopup] = useState({ visible: false, message: '', fading: false });
+  const [response, setResponse] = useState({ visible: false, message: '', fading: false });
+
+  const typingRef = useRef(null);
+  const segmentRef = useRef(0);
+  const charRef = useRef(0);
+  const pausedRef = useRef(false);
+  const accumRef = useRef('');
+  const editorRef = useRef(null);
+
+  useEffect(() => {
+    typingRef.current = setInterval(() => {
+      if (pausedRef.current) return;
+
+      const segIdx = segmentRef.current;
+      const seg = DEMO_SEGMENTS[segIdx];
+      if (!seg) return;
+
+      charRef.current++;
+      const code = accumRef.current + seg.code.slice(0, charRef.current);
+      setEditorCode(code);
+
+      // Auto-scroll to bottom
+      if (editorRef.current) {
+        const lineCount = editorRef.current.getModel()?.getLineCount() ?? 1;
+        editorRef.current.revealLine(lineCount);
+      }
+
+      if (charRef.current >= seg.code.length) {
+        pausedRef.current = true;
+        accumRef.current += seg.code;
+
+        setTimeout(() => {
+          // AI interviewer card
+          setPopup({ visible: true, message: seg.popup, fading: false });
+
+          // Interviewee response card after 2s
+          setTimeout(() => {
+            setResponse({ visible: true, message: seg.response, fading: false });
+          }, 2000);
+
+          // Fade both out at 4s
+          setTimeout(() => {
+            setPopup(p => ({ ...p, fading: true }));
+            setResponse(p => ({ ...p, fading: true }));
+          }, 4000);
+
+          // Hide both, advance segment
+          setTimeout(() => {
+            setPopup({ visible: false, message: '', fading: false });
+            setResponse({ visible: false, message: '', fading: false });
+
+            const next = segmentRef.current + 1;
+            if (next >= DEMO_SEGMENTS.length) {
+              segmentRef.current = 0;
+              charRef.current = 0;
+              accumRef.current = '';
+              setEditorCode('');
+            } else {
+              segmentRef.current = next;
+              charRef.current = 0;
+            }
+            pausedRef.current = false;
+          }, 4700);
+        }, 600);
+      }
+    }, 18);
+
+    return () => clearInterval(typingRef.current);
+  }, []);
 
   return (
     <div style={{
-      minHeight: '100vh', color: '#f0f0f0', fontFamily: 'sans-serif',
+      minHeight: '100vh', color: '#f0f0f0', fontFamily: 'Inter, sans-serif',
       backgroundImage: `url(${bgImage})`,
       backgroundSize: 'cover', backgroundPosition: 'center top',
       position: 'relative',
     }}>
-      {/* Dark overlay so text stays readable */}
       <div style={{
         position: 'fixed', inset: 0,
         background: 'rgba(5,5,8,0.78)',
@@ -85,7 +171,7 @@ export default function Landing({ scenarios, onStart }) {
         </div>
         <a href="#" style={{ color: '#ccc', fontSize: 14, textDecoration: 'none' }}
           onMouseEnter={e => e.target.style.color = '#f0f0f0'}
-          onMouseLeave={e => e.target.style.color = '#555'}>
+          onMouseLeave={e => e.target.style.color = '#ccc'}>
           Sign in
         </a>
       </nav>
@@ -93,8 +179,8 @@ export default function Landing({ scenarios, onStart }) {
       {/* Hero */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '48px 24px 0', position: 'relative', zIndex: 1 }}>
         <h1 style={{
-          fontSize: 'clamp(2.8rem, 7vw, 5rem)', fontWeight: 800, lineHeight: 1.05,
-          letterSpacing: '-0.03em', maxWidth: 900, margin: '0 0 16px',
+          fontSize: 'clamp(2.8rem, 7vw, 5rem)', fontWeight: 500, lineHeight: 1.05,
+          letterSpacing: '-0.04em', maxWidth: 900, margin: '0 0 16px',
         }}>
           Practice debugging like a real interview
         </h1>
@@ -109,33 +195,27 @@ export default function Landing({ scenarios, onStart }) {
             display: 'flex', alignItems: 'center', gap: 8,
             background: '#ff5c35', color: '#fff', border: 'none',
             padding: '13px 28px', borderRadius: 8,
-            fontSize: 15, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.01em',
+            fontSize: 15, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.005em',
           }}>
             Start practicing <span style={{ fontSize: 16 }}>→</span>
           </button>
           <button style={{
-            background: 'transparent', color: '#f0f0f0',
-            border: '1px solid #333', padding: '13px 28px', borderRadius: 8,
-            fontSize: 15, cursor: 'pointer', fontFamily: 'sans-serif',
+            ...liquidGlass,
+            color: '#f0f0f0',
+            padding: '13px 28px',
+            fontSize: 15, cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+            border: '1px solid rgba(255,255,255,0.15)',
           }}>
             View examples
           </button>
         </div>
 
-        {/* Feature checkmarks */}
-        <div style={{ display: 'flex', gap: 24, marginBottom: 40 }}>
-          {['Real scenarios', 'AI feedback', 'Detailed reports'].map(f => (
-            <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#555' }}>
-              <span style={{ color: '#3ddc84', fontWeight: 700 }}>✓</span> {f}
-            </div>
-          ))}
-        </div>
-
         {/* Code demo panel */}
         <div style={{
-          width: '100%', maxWidth: 860, borderRadius: 12,
+          width: '100%', maxWidth: 1000, borderRadius: 12,
           border: '1px solid #222', background: '#111', overflow: 'hidden',
           marginBottom: 40, boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+          position: 'relative',
         }}>
           {/* Panel top bar */}
           <div style={{
@@ -150,30 +230,74 @@ export default function Landing({ scenarios, onStart }) {
             <span style={{ fontSize: 11, color: '#444', fontFamily: 'monospace' }}>orders.js</span>
           </div>
 
-          {/* Code content */}
-          <div style={{ position: 'relative', padding: '20px 20px 16px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {CODE_LINES.map((tokens, i) => (
-                <CodeLine key={i} lineNumber={i + 1} tokens={tokens} />
-              ))}
-            </div>
-
-            {/* Score badge */}
-            <div style={{
-              position: 'absolute', top: 16, right: 16,
-              background: '#1a1a1a', border: '1px solid #2a2a2a',
-              borderRadius: 8, padding: '6px 12px', textAlign: 'center',
-            }}>
-              <div style={{ fontSize: 20, fontWeight: 800, color: '#f5a623', lineHeight: 1 }}>73</div>
-              <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>/100</div>
-            </div>
+          {/* Monaco editor */}
+          <div style={{ height: 420 }}>
+            <Editor
+              height="100%"
+              language="javascript"
+              theme="vs-dark"
+              value={editorCode}
+              onMount={editor => { editorRef.current = editor; }}
+              options={{
+                fontSize: 13,
+                minimap: { enabled: false },
+                lineNumbers: 'on',
+                wordWrap: 'on',
+                scrollBeyondLastLine: false,
+                padding: { top: 12 },
+                scrollbar: { vertical: 'hidden', horizontal: 'hidden' },
+                overviewRulerLanes: 0,
+                readOnly: true,
+                domReadOnly: true,
+                cursorBlinking: 'smooth',
+              }}
+            />
           </div>
 
+          {/* AI interviewer popup — bottom right */}
+          {popup.visible && (
+            <div style={{
+              position: 'absolute', bottom: 56, right: 20,
+              maxWidth: 260, zIndex: 10,
+              opacity: popup.fading ? 0 : 1,
+              transform: popup.fading ? 'translateY(4px)' : 'translateY(0)',
+              transition: 'opacity 0.4s ease, transform 0.4s ease',
+            }}>
+              <div style={liquidGlass}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#ff5c35', flexShrink: 0 }} />
+                  <span style={{ fontSize: 10, fontWeight: 600, color: '#ff5c35', letterSpacing: '0.1em' }}>AI INTERVIEWER</span>
+                </div>
+                <p style={{ fontSize: 13, color: '#f0f0f0', lineHeight: 1.55, margin: 0 }}>
+                  {popup.message}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Interviewee response popup — bottom left */}
+          {response.visible && (
+            <div style={{
+              position: 'absolute', bottom: 56, left: 20,
+              maxWidth: 260, zIndex: 10,
+              opacity: response.fading ? 0 : 1,
+              transform: response.fading ? 'translateY(4px)' : 'translateY(0)',
+              transition: 'opacity 0.4s ease, transform 0.4s ease',
+            }}>
+              <div style={liquidGlass}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#3ddc84', flexShrink: 0 }} />
+                  <span style={{ fontSize: 10, fontWeight: 600, color: '#3ddc84', letterSpacing: '0.1em' }}>CANDIDATE</span>
+                </div>
+                <p style={{ fontSize: 13, color: '#f0f0f0', lineHeight: 1.55, margin: 0 }}>
+                  {response.message}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* AI status bar */}
-          <div style={{
-            padding: '10px 20px 14px',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
+          <div style={{ padding: '10px 20px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#ff5c35' }} />
             <span style={{ fontSize: 12, color: '#555', fontStyle: 'italic' }}>
               AI interviewer is analyzing your code...
@@ -181,27 +305,6 @@ export default function Landing({ scenarios, onStart }) {
           </div>
         </div>
 
-        {/* Stats row */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: 1, width: '100%', maxWidth: 860,
-          border: '1px solid #1a1a1a', borderRadius: 12, overflow: 'hidden', marginBottom: 48,
-        }}>
-          {[
-            { value: '5+', label: 'Debugging scenarios' },
-            { value: 'Real-time', label: 'AI feedback' },
-            { value: '100%', label: 'Mock practice' },
-            { value: 'No signup', label: 'Start immediately' },
-          ].map((stat, i) => (
-            <div key={i} style={{
-              background: '#111', padding: '24px 20px', textAlign: 'center',
-              borderRight: i < 3 ? '1px solid #1a1a1a' : 'none',
-            }}>
-              <div style={{ fontSize: 18, fontWeight: 800, color: '#f0f0f0', marginBottom: 4 }}>{stat.value}</div>
-              <div style={{ fontSize: 12, color: '#555' }}>{stat.label}</div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
