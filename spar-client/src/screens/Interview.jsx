@@ -24,7 +24,6 @@ class MonacoErrorBoundary extends Component {
     if (this.state.hasError) {
       return this.props.fallback;
     }
-
     return this.props.children;
   }
 }
@@ -80,14 +79,8 @@ function getVisibleFilesMap(scenario) {
 }
 
 function getLanguageForFile(filename) {
-  if (filename.endsWith('.json')) {
-    return 'json';
-  }
-
-  if (filename.endsWith('.css')) {
-    return 'css';
-  }
-
+  if (filename.endsWith('.json')) return 'json';
+  if (filename.endsWith('.css')) return 'css';
   return 'javascript';
 }
 
@@ -99,10 +92,34 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
   const [fileContents, setFileContents] = useState(() => ({ ...visibleFilesMap }));
   const [usePlainEditor, setUsePlainEditor] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
+  const [chatOpen, setChatOpen] = useState(true);
+  const [chatWidth, setChatWidth] = useState(380);
   const chatEndRef = useRef(null);
   const activeFileRef = useRef(initialFile);
   const editorListenerRef = useRef(null);
+  const dragRef = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(380);
   const tracker = useSessionTracker({ scenarioId: scenario.id, initialFile });
+
+  const onDragStart = useCallback((e) => {
+    dragRef.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = chatWidth;
+
+    const onMove = (e) => {
+      if (!dragRef.current) return;
+      const delta = dragStartX.current - e.clientX;
+      setChatWidth(Math.min(600, Math.max(240, dragStartWidth.current + delta)));
+    };
+    const onUp = () => {
+      dragRef.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [chatWidth]);
 
   const handleTrackedMessage = useCallback((message) => {
     tracker.recordChatMessage(message);
@@ -133,9 +150,7 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
   });
 
   useEffect(() => {
-    if (sessionId) {
-      tracker.setSessionId(sessionId);
-    }
+    if (sessionId) tracker.setSessionId(sessionId);
   }, [sessionId, tracker]);
 
   useEffect(() => {
@@ -149,9 +164,7 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
   const updateFileContent = useCallback((filename, nextValue) => {
     const normalizedValue = nextValue ?? '';
     setFileContents((prev) => (
-      prev[filename] === normalizedValue
-        ? prev
-        : { ...prev, [filename]: normalizedValue }
+      prev[filename] === normalizedValue ? prev : { ...prev, [filename]: normalizedValue }
     ));
   }, []);
 
@@ -160,13 +173,7 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
       file: filename,
       ts: Date.now(),
       versionId: null,
-      changes: [
-        {
-          rangeOffset: 0,
-          rangeLength: 0,
-          text: value ?? '',
-        },
-      ],
+      changes: [{ rangeOffset: 0, rangeLength: 0, text: value ?? '' }],
     });
   }, [tracker]);
 
@@ -187,10 +194,7 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
   const handleEditorChange = useCallback((value) => {
     const filename = activeFileRef.current;
     updateFileContent(filename, value);
-
-    if (usePlainEditor) {
-      recordPlainEditorChange(filename, value);
-    }
+    if (usePlainEditor) recordPlainEditorChange(filename, value);
   }, [recordPlainEditorChange, updateFileContent, usePlainEditor]);
 
   const handleMonacoMount = useCallback((editor) => {
@@ -199,7 +203,6 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
     editorListenerRef.current = editor.onDidChangeModelContent((event) => {
       const filename = activeFileRef.current;
       const nextValue = editor.getValue();
-
       tracker.recordEditorChange({
         file: filename,
         ts: Date.now(),
@@ -212,7 +215,6 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
           text: change.text,
         })),
       });
-
       updateFileContent(filename, nextValue);
     });
   }, [setUsePlainEditor, tracker, updateFileContent]);
@@ -235,19 +237,14 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
   }, [finishSession, onBack]);
 
   const handleFinish = useCallback(() => {
-    if (isFinishing) {
-      return;
-    }
-
+    if (isFinishing) return;
     setIsFinishing(true);
     finishSession();
-
     const trackerPayload = tracker.finalize({
       finalFiles: fileContents,
       activeFileAtFinish: activeFileRef.current,
       finishedAt: Date.now(),
     });
-
     onFinish({
       sessionId,
       scenarioId: scenario.id,
@@ -261,40 +258,32 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
       onChange={(event) => handleEditorChange(event.target.value)}
       spellCheck={false}
       style={{
-        width: '100%',
-        height: '100%',
-        padding: 16,
-        border: 'none',
-        background: '#111',
-        color: '#f0f0f0',
-        fontFamily: 'monospace',
-        fontSize: 14,
-        lineHeight: 1.5,
-        resize: 'none',
-        outline: 'none',
+        width: '100%', height: '100%', padding: 16, border: 'none',
+        background: '#111', color: '#f0f0f0', fontFamily: 'monospace',
+        fontSize: 14, lineHeight: 1.5, resize: 'none', outline: 'none',
       }}
     />
   );
+
   const interactionDisabled = isFinishing;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#0a0a0b', color: '#f0f0f0', fontFamily: 'sans-serif' }}>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid #222' }}>
-        <div style={{ display: 'flex', background: '#111', borderBottom: '1px solid #222', overflowX: 'auto' }}>
+    <div style={{ display: 'flex', height: '100vh', background: '#0a0a0b', color: '#f0f0f0', fontFamily: 'Inter, sans-serif', userSelect: dragRef.current ? 'none' : 'auto' }}>
+
+      {/* Editor panel */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div style={{ display: 'flex', background: '#0d0d0f', borderBottom: '1px solid #1e1e1e', overflowX: 'auto' }}>
           {visibleFiles.map((filename) => (
             <button
               key={filename}
               onClick={() => handleFileSelect(filename)}
               style={{
-                padding: '10px 20px',
-                border: 'none',
-                cursor: 'pointer',
-                background: activeFile === filename ? '#1e1e1e' : 'transparent',
-                color: activeFile === filename ? '#fff' : '#666',
-                fontFamily: 'monospace',
-                fontSize: 13,
+                padding: '11px 20px', border: 'none', cursor: 'pointer',
+                background: activeFile === filename ? '#141416' : 'transparent',
+                color: activeFile === filename ? '#f0f0f0' : '#555',
+                fontFamily: 'monospace', fontSize: 13,
                 borderBottom: activeFile === filename ? '2px solid #ff5c35' : '2px solid transparent',
-                whiteSpace: 'nowrap',
+                whiteSpace: 'nowrap', transition: 'color 0.15s',
               }}
             >
               {filename.split('/').pop()}
@@ -316,12 +305,8 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
                 onMount={handleMonacoMount}
                 loading={<MonacoLoadingFallback onUsePlainEditor={() => setUsePlainEditor(true)} />}
                 options={{
-                  fontSize: 14,
-                  minimap: { enabled: false },
-                  lineNumbers: 'on',
-                  wordWrap: 'on',
-                  scrollBeyondLastLine: false,
-                  padding: { top: 16 },
+                  fontSize: 14, minimap: { enabled: false }, lineNumbers: 'on',
+                  wordWrap: 'on', scrollBeyondLastLine: false, padding: { top: 16 },
                 }}
               />
             </MonacoErrorBoundary>
@@ -329,95 +314,147 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
         </div>
 
         {usePlainEditor && (
-          <div style={{ padding: '10px 16px', borderTop: '1px solid #222', background: '#0f0f10', color: '#666', fontSize: 12 }}>
+          <div style={{ padding: '10px 16px', borderTop: '1px solid #1e1e1e', background: '#0d0d0f', color: '#555', fontSize: 12 }}>
             Monaco did not load, so Spar switched to the plain text editor fallback.
           </div>
         )}
       </div>
 
-      <div style={{ width: 380, display: 'flex', flexDirection: 'column', background: '#111' }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {onBack && (
+      {/* Drag handle */}
+      {chatOpen && (
+        <div
+          onMouseDown={onDragStart}
+          style={{
+            width: 4, flexShrink: 0, cursor: 'col-resize',
+            background: 'transparent', borderLeft: '1px solid #222',
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = '#ff5c35'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        />
+      )}
+
+      {/* Reopen button when chat is closed */}
+      {!chatOpen && (
+        <button
+          onClick={() => setChatOpen(true)}
+          style={{
+            width: 28, flexShrink: 0, background: '#0f0f14', border: 'none',
+            borderLeft: '1px solid #222', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#444', fontSize: 18,
+          }}
+          title="Open chat"
+        >
+          ‹
+        </button>
+      )}
+
+      {/* Chat panel */}
+      {chatOpen && (
+        <div style={{ width: chatWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#0f0f14', borderLeft: '1px solid #222' }}>
+          <div style={{ padding: '14px 20px', borderBottom: '2px solid #ff5c35', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#13131a' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {onBack && (
+                <button
+                  onClick={handleBack}
+                  title="Exit interview"
+                  style={{
+                    background: 'transparent', border: '1px solid #2a2a2a', color: '#666',
+                    padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+                    fontFamily: 'Inter, sans-serif', fontSize: 12,
+                    transition: 'color 0.15s, border-color 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = '#f0f0f0'; e.currentTarget.style.borderColor = '#555'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#666'; e.currentTarget.style.borderColor = '#2a2a2a'; }}
+                >
+                  ← Back
+                </button>
+              )}
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', letterSpacing: '-0.01em', fontFamily: 'Inter, sans-serif' }}>Spar</div>
+                <div style={{ fontSize: 11, color: '#666', marginTop: 2, fontFamily: 'Inter, sans-serif' }}>{scenario.title}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Timer seconds={scenario.timeLimit} onExpire={handleFinish} />
               <button
-                onClick={handleBack}
+                onClick={() => setChatOpen(false)}
                 style={{
-                  background: 'transparent',
-                  color: '#666',
-                  border: '1px solid #333',
-                  borderRadius: 8,
-                  padding: '8px 10px',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  lineHeight: 1,
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: '#444', fontSize: 18, lineHeight: 1, padding: '2px 4px',
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.color = '#888'}
+                onMouseLeave={e => e.currentTarget.style.color = '#444'}
+                title="Close chat"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+
+          {interviewerError && (
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e1e1e', background: '#130d0d', color: '#ff8c6b', fontSize: 13 }}>
+              {interviewerError}
+            </div>
+          )}
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {!isReady && !interviewerError && messages.length === 0 && (
+              <div style={{ alignSelf: 'flex-start', color: '#444', fontSize: 13, fontStyle: 'italic' }}>
+                connecting interviewer...
+              </div>
+            )}
+
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                style={{
+                  alignSelf: message.role === 'assistant' ? 'flex-start' : 'flex-end',
+                  maxWidth: '85%', padding: '11px 15px',
+                  borderRadius: message.role === 'assistant' ? '4px 14px 14px 14px' : '14px 4px 14px 14px',
+                  background: message.role === 'assistant' ? '#1a1a24' : '#ff5c35',
+                  border: message.role === 'assistant' ? '1px solid #2a2a38' : 'none',
+                  color: message.role === 'assistant' ? '#ddd' : '#fff',
+                  fontSize: 14, lineHeight: 1.65, fontFamily: 'Inter, sans-serif',
                 }}
               >
-                ← Back
-              </button>
+                {message.content}
+              </div>
+            ))}
+
+            {isThinking && (
+              <div style={{ alignSelf: 'flex-start', display: 'flex', gap: 5, padding: '10px 14px', background: '#1a1a24', border: '1px solid #2a2a38', borderRadius: '4px 14px 14px 14px' }}>
+                {[0, 1, 2].map(i => (
+                  <div key={i} style={{
+                    width: 6, height: 6, borderRadius: '50%', background: '#555',
+                    animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+                  }} />
+                ))}
+              </div>
             )}
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#ff5c35', letterSpacing: '0.1em' }}>SPAR</div>
-              <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{scenario.title}</div>
-            </div>
+            <style>{`@keyframes pulse { 0%,80%,100%{opacity:0.3} 40%{opacity:1} }`}</style>
+            <div ref={chatEndRef} />
           </div>
-          <Timer seconds={scenario.timeLimit} onExpire={handleFinish} />
+
+          <VoiceBar
+            liveTranscript={liveTranscript}
+            isListening={isListening}
+            isThinking={isThinking}
+            isAgentSpeaking={isAgentSpeaking}
+            connectionState={connectionState}
+            errorMessage={interviewerError}
+            sessionReady={isReady}
+            disabled={interactionDisabled}
+            disableFinish={isFinishing}
+            onStart={handleVoiceStart}
+            onStop={handleVoiceStop}
+            onFinish={handleFinish}
+            onSubmitText={handleTypedSubmit}
+          />
         </div>
-
-        {interviewerError && (
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid #222', background: '#161014', color: '#ff8c6b', fontSize: 13 }}>
-            {interviewerError}
-          </div>
-        )}
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {!isReady && !interviewerError && messages.length === 0 && (
-            <div style={{ alignSelf: 'flex-start', color: '#555', fontSize: 13, fontStyle: 'italic' }}>
-              connecting interviewer...
-            </div>
-          )}
-
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              style={{
-                alignSelf: message.role === 'assistant' ? 'flex-start' : 'flex-end',
-                maxWidth: '85%',
-                padding: '10px 14px',
-                borderRadius: message.role === 'assistant' ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
-                background: message.role === 'assistant' ? '#1e1e26' : '#ff5c35',
-                color: '#f0f0f0',
-                fontSize: 14,
-                lineHeight: 1.5,
-              }}
-            >
-              {message.content}
-            </div>
-          ))}
-
-          {isThinking && (
-            <div style={{ alignSelf: 'flex-start', color: '#555', fontSize: 13, fontStyle: 'italic' }}>
-              thinking...
-            </div>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-
-        <VoiceBar
-          liveTranscript={liveTranscript}
-          isListening={isListening}
-          isThinking={isThinking}
-          isAgentSpeaking={isAgentSpeaking}
-          connectionState={connectionState}
-          errorMessage={interviewerError}
-          sessionReady={isReady}
-          disabled={interactionDisabled}
-          disableFinish={isFinishing}
-          onStart={handleVoiceStart}
-          onStop={handleVoiceStop}
-          onFinish={handleFinish}
-          onSubmitText={handleTypedSubmit}
-        />
-      </div>
+      )}
     </div>
   );
 }
