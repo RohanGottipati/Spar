@@ -1,7 +1,6 @@
-import { Component, useCallback, useEffect, useRef, useState } from 'react';
+import { Component, useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { useDeepgram } from '../hooks/useDeepgram';
-import { useInterviewer } from '../hooks/useInterviewer';
+import { useLiveVoiceInterview } from '../hooks/useLiveVoiceInterview';
 import { useSessionTracker } from '../hooks/useSessionTracker';
 import VoiceBar from '../components/VoiceBar';
 import Timer from '../components/Timer';
@@ -69,7 +68,7 @@ function getLanguageForFile(filename) {
   return 'javascript';
 }
 
-export default function Interview({ scenario, onFinish, onBack }) {
+export default function Interview({ scenario, onFinish, onBack, onScenarioUnavailable }) {
   const visibleFilesMap = getVisibleFilesMap(scenario);
   const visibleFiles = Object.keys(visibleFilesMap);
   const initialFile = visibleFiles[0] || '';
@@ -86,8 +85,28 @@ export default function Interview({ scenario, onFinish, onBack }) {
     tracker.recordChatMessage(message);
   }, [tracker]);
 
-  const { sessionId, messages, isThinking, isReady, error: interviewerError, sendMessage, finishSession } = useInterviewer(scenario, {
-    onMessage: handleTrackedMessage,
+  const handleTrackedUtterance = useCallback((utterance) => {
+    tracker.recordUtterance(utterance);
+  }, [tracker]);
+
+  const {
+    sessionId,
+    messages,
+    isReady,
+    isThinking,
+    isListening,
+    isAgentSpeaking,
+    liveTranscript,
+    connectionState,
+    error: interviewerError,
+    startListening,
+    stopListening,
+    sendTextMessage,
+    finishSession,
+  } = useLiveVoiceInterview(scenario, {
+    onFinalMessage: handleTrackedMessage,
+    onFinalUtterance: handleTrackedUtterance,
+    onScenarioNotFound: onScenarioUnavailable,
   });
 
   useEffect(() => {
@@ -98,7 +117,7 @@ export default function Interview({ scenario, onFinish, onBack }) {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isThinking]);
+  }, [isAgentSpeaking, isThinking, messages]);
 
   useEffect(() => () => {
     editorListenerRef.current?.dispose?.();
@@ -128,31 +147,13 @@ export default function Interview({ scenario, onFinish, onBack }) {
     });
   }, [tracker]);
 
-  const submitCandidateMessage = useCallback((text, source) => {
-    const trimmedText = typeof text === 'string' ? text.trim() : '';
-    if (!trimmedText || isFinishing) {
-      return;
-    }
+  const handleVoiceStart = useCallback(() => {
+    startListening();
+  }, [startListening]);
 
-    tracker.recordUtterance({
-      text: trimmedText,
-      source,
-      ts: Date.now(),
-    });
-
-    sendMessage(trimmedText, { source });
-  }, [isFinishing, sendMessage, tracker]);
-
-  const {
-    isListening,
-    liveTranscript,
-    connectionState,
-    error,
-    startListening,
-    stopListening,
-  } = useDeepgram({
-    onFinalTranscript: (text) => submitCandidateMessage(text, 'voice'),
-  });
+  const handleVoiceStop = useCallback(() => {
+    stopListening();
+  }, [stopListening]);
 
   const handleFileSelect = useCallback((filename) => {
     setActiveFile(filename);
@@ -193,18 +194,22 @@ export default function Interview({ scenario, onFinish, onBack }) {
     });
   }, [setUsePlainEditor, tracker, updateFileContent]);
 
-  useEffect(() => () => {
-    stopListening();
+  const handleUnmount = useEffectEvent(() => {
     finishSession();
-  }, [finishSession, stopListening]);
+  });
+
+  useEffect(() => () => {
+    handleUnmount();
+  }, []);
 
   const handleTypedSubmit = useCallback((text) => {
-    if (isListening) {
-      stopListening();
-    }
+    sendTextMessage(text);
+  }, [sendTextMessage]);
 
-    submitCandidateMessage(text, 'typed');
-  }, [isListening, stopListening, submitCandidateMessage]);
+  const handleBack = useCallback(() => {
+    finishSession();
+    onBack?.();
+  }, [finishSession, onBack]);
 
   const handleFinish = useCallback(() => {
     if (isFinishing) {
@@ -212,7 +217,6 @@ export default function Interview({ scenario, onFinish, onBack }) {
     }
 
     setIsFinishing(true);
-    stopListening();
     finishSession();
 
     const trackerPayload = tracker.finalize({
@@ -226,7 +230,7 @@ export default function Interview({ scenario, onFinish, onBack }) {
       scenarioId: scenario.id,
       tracker: trackerPayload,
     });
-  }, [fileContents, finishSession, isFinishing, onFinish, scenario.id, sessionId, stopListening, tracker]);
+  }, [fileContents, finishSession, isFinishing, onFinish, scenario.id, sessionId, tracker]);
 
   const simpleEditor = (
     <textarea
@@ -248,7 +252,7 @@ export default function Interview({ scenario, onFinish, onBack }) {
       }}
     />
   );
-  const interactionDisabled = isFinishing || !isReady || Boolean(interviewerError);
+  const interactionDisabled = isFinishing;
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#0a0a0b', color: '#f0f0f0', fontFamily: 'sans-serif' }}>
@@ -313,12 +317,16 @@ export default function Interview({ scenario, onFinish, onBack }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {onBack && (
               <button
-                onClick={() => { stopListening(); onBack(); }}
-                title="Exit interview"
+                onClick={handleBack}
                 style={{
-                  background: 'transparent', border: '1px solid #333', color: '#555',
-                  padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-                  fontFamily: 'sans-serif', fontSize: 12,
+                  background: 'transparent',
+                  color: '#666',
+                  border: '1px solid #333',
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  lineHeight: 1,
                 }}
               >
                 ← Back
@@ -341,7 +349,7 @@ export default function Interview({ scenario, onFinish, onBack }) {
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           {!isReady && !interviewerError && messages.length === 0 && (
             <div style={{ alignSelf: 'flex-start', color: '#555', fontSize: 13, fontStyle: 'italic' }}>
-              preparing interviewer...
+              connecting interviewer...
             </div>
           )}
 
@@ -375,12 +383,14 @@ export default function Interview({ scenario, onFinish, onBack }) {
           liveTranscript={liveTranscript}
           isListening={isListening}
           isThinking={isThinking}
+          isAgentSpeaking={isAgentSpeaking}
           connectionState={connectionState}
-          errorMessage={error}
+          errorMessage={interviewerError}
+          sessionReady={isReady}
           disabled={interactionDisabled}
           disableFinish={isFinishing}
-          onStart={startListening}
-          onStop={stopListening}
+          onStart={handleVoiceStart}
+          onStop={handleVoiceStop}
           onFinish={handleFinish}
           onSubmitText={handleTypedSubmit}
         />

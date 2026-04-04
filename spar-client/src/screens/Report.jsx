@@ -28,6 +28,7 @@ function getVerdictColor(verdict) {
 export default function Report({ report, scenario, onRetry }) {
   const dimensions = Array.isArray(report?.dimensions) ? report.dimensions : [];
   const meta = report?.sessionMeta || {};
+  const scenarioSummary = report?.scenarioSummary || {};
   const verdictColor = getVerdictColor(report?.verdict);
 
   return (
@@ -47,7 +48,7 @@ export default function Report({ report, scenario, onRetry }) {
         </div>
         <h1 style={{ fontSize: 36, fontWeight: 800, marginBottom: 8 }}>Your Report</h1>
         <p style={{ color: '#555', marginBottom: 28 }}>
-          {scenario.title} · {formatDuration(meta.durationSeconds)}
+          {(scenarioSummary.title || scenario.title)} · {formatDuration(meta.durationSeconds)}
         </p>
 
         <div style={{
@@ -109,8 +110,12 @@ export default function Report({ report, scenario, onRetry }) {
             <div style={{ fontSize: 12, color: '#555', fontWeight: 700, letterSpacing: '0.15em', marginBottom: 12 }}>
               THE BUG
             </div>
-            <p style={{ color: '#ccc', lineHeight: 1.6, marginTop: 0 }}>{scenario.bugExplanation}</p>
-            <div style={{ marginTop: 16, fontSize: 13, color: '#ff5c35' }}>Fix: {scenario.fixSummary}</div>
+            <p style={{ color: '#ccc', lineHeight: 1.6, marginTop: 0 }}>
+              {scenarioSummary.bugExplanation || 'The final report did not include the bug summary.'}
+            </p>
+            <div style={{ marginTop: 16, fontSize: 13, color: '#ff5c35' }}>
+              Fix: {scenarioSummary.fixSummary || 'Unavailable'}
+            </div>
           </div>
         </div>
 

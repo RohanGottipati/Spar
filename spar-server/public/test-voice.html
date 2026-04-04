@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Spar Voice Harness</title>
+    <title>Spar Voice Agent Harness</title>
     <style>
       :root {
         color-scheme: dark;
@@ -22,7 +22,7 @@
       }
 
       main {
-        width: min(720px, 100%);
+        width: min(980px, 100%);
         background: #111;
         border: 1px solid #222;
         border-radius: 20px;
@@ -51,32 +51,15 @@
 
       .row {
         display: flex;
+        flex-wrap: wrap;
         gap: 12px;
-        margin: 20px 0;
+        margin: 16px 0;
       }
 
-      button {
-        border: none;
-        border-radius: 10px;
-        padding: 12px 18px;
-        font-size: 14px;
-        font-weight: 700;
-        cursor: pointer;
-      }
-
-      #start {
-        background: #ff5c35;
-        color: #fff;
-      }
-
-      #stop {
-        background: #1e1e26;
-        color: #fff;
-      }
-
-      button:disabled {
-        opacity: 0.45;
-        cursor: not-allowed;
+      .panel-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
       }
 
       .panel {
@@ -95,198 +78,565 @@
         color: #666;
       }
 
-      #live {
-        min-height: 24px;
-        font-style: italic;
-        color: #bbb;
+      button,
+      input {
+        border-radius: 10px;
+        font-size: 14px;
       }
 
-      #final {
-        display: grid;
-        gap: 10px;
+      button {
+        border: none;
+        padding: 12px 18px;
+        font-weight: 700;
+        cursor: pointer;
       }
 
-      .final-line {
+      input {
+        border: 1px solid #2a2a35;
+        background: #0a0a0b;
+        color: #f0f0f0;
+        padding: 12px 14px;
+      }
+
+      button:disabled,
+      input:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      #start-session {
+        background: #ff5c35;
+        color: #fff;
+      }
+
+      #start-mic {
+        background: #3ddc84;
+        color: #08120d;
+      }
+
+      #stop-mic,
+      #send-text {
+        background: #1e1e26;
+        color: #fff;
+      }
+
+      #scenario-id,
+      #typed-input {
+        min-width: 240px;
+        flex: 1;
+      }
+
+      #live,
+      #chat,
+      #events {
+        min-height: 160px;
+        max-height: 320px;
+        overflow: auto;
+        white-space: pre-wrap;
+        line-height: 1.5;
+      }
+
+      .chat-line {
         padding: 10px 12px;
         border-radius: 10px;
+        margin-bottom: 8px;
+      }
+
+      .chat-line.user {
+        background: #ff5c35;
+      }
+
+      .chat-line.assistant {
         background: #17171a;
-        color: #e4e4e4;
+      }
+
+      .event-line {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #bbb;
+        margin-bottom: 6px;
+      }
+
+      @media (max-width: 900px) {
+        .panel-row {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
     <main>
-      <h1>Spar Voice Harness</h1>
+      <h1>Spar Voice Agent Harness</h1>
       <p>
-        Open this page in Chrome at <code>http://localhost:3001/test-voice.html</code>, allow microphone access,
-        and confirm that interim and final transcripts appear before testing the React app.
+        Open this page in Chrome at <code>http://localhost:3001/test-voice.html</code>, start a live session,
+        confirm the opening greeting arrives, then test microphone turns, interruptions, and typed fallback
+        against the same live voice-agent websocket used by the app.
       </p>
 
-      <div id="status" class="status">Idle. Click Start and speak normally.</div>
+      <div id="status" class="status">Idle. Start a live session to begin.</div>
 
       <div class="row">
-        <button id="start" type="button">Start</button>
-        <button id="stop" type="button" disabled>Stop</button>
+        <input id="scenario-id" type="text" value="duplicate-orders" />
+        <button id="start-session" type="button">Start Session</button>
+        <button id="start-mic" type="button" disabled>Start Mic</button>
+        <button id="stop-mic" type="button" disabled>Stop Mic</button>
+      </div>
+
+      <div class="row">
+        <input id="typed-input" type="text" placeholder="Typed fallback message..." disabled />
+        <button id="send-text" type="button" disabled>Send Text</button>
+      </div>
+
+      <div class="panel-row">
+        <section class="panel">
+          <div class="label">Live Transcript</div>
+          <div id="live"></div>
+        </section>
+
+        <section class="panel">
+          <div class="label">Chat</div>
+          <div id="chat"></div>
+        </section>
       </div>
 
       <section class="panel">
-        <div class="label">Live Transcript</div>
-        <div id="live"></div>
-      </section>
-
-      <section class="panel">
-        <div class="label">Final Transcript</div>
-        <div id="final"></div>
+        <div class="label">Event Log</div>
+        <div id="events"></div>
       </section>
     </main>
 
     <script>
+      const INPUT_SAMPLE_RATE = 16000;
+      const OUTPUT_SAMPLE_RATE = 24000;
       const statusEl = document.getElementById('status');
       const liveEl = document.getElementById('live');
-      const finalEl = document.getElementById('final');
-      const startButton = document.getElementById('start');
-      const stopButton = document.getElementById('stop');
+      const chatEl = document.getElementById('chat');
+      const eventsEl = document.getElementById('events');
+      const scenarioInput = document.getElementById('scenario-id');
+      const typedInput = document.getElementById('typed-input');
+      const startSessionButton = document.getElementById('start-session');
+      const startMicButton = document.getElementById('start-mic');
+      const stopMicButton = document.getElementById('stop-mic');
+      const sendTextButton = document.getElementById('send-text');
 
-      let mediaStream = null;
-      let mediaRecorder = null;
       let socket = null;
+      let sessionId = '';
+      let mediaStream = null;
+      let captureContext = null;
+      let captureSource = null;
+      let captureProcessor = null;
+      let captureMute = null;
+      let playbackContext = null;
+      let playbackGain = null;
+      let playbackSources = new Set();
+      let playbackNextTime = 0;
+      let currentMessages = [];
 
-      function setStatus(message, color) {
+      function setStatus(message, color = '#f5a623') {
         statusEl.textContent = message;
         statusEl.style.color = color;
       }
 
-      function cleanup() {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-          try {
-            mediaRecorder.stop();
-          } catch (err) {
-            console.error('Recorder stop failed:', err);
-          }
-        }
-
-        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-          try {
-            socket.close();
-          } catch (err) {
-            console.error('Socket close failed:', err);
-          }
-        }
-
-        if (mediaStream) {
-          mediaStream.getTracks().forEach((track) => track.stop());
-        }
-
-        mediaStream = null;
-        mediaRecorder = null;
-        socket = null;
-        startButton.disabled = false;
-        stopButton.disabled = true;
-        liveEl.textContent = '';
+      function logEvent(message) {
+        const line = document.createElement('div');
+        line.className = 'event-line';
+        line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        eventsEl.prepend(line);
       }
 
-      function getRecorderOptions() {
-        if (!window.MediaRecorder) {
-          return undefined;
-        }
-
-        const preferredMimeTypes = ['audio/webm;codecs=opus', 'audio/webm'];
-        const supportedMimeType = preferredMimeTypes.find((mimeType) => (
-          typeof MediaRecorder.isTypeSupported === 'function'
-            ? MediaRecorder.isTypeSupported(mimeType)
-            : false
-        ));
-
-        return supportedMimeType ? { mimeType: supportedMimeType } : undefined;
+      function syncControls() {
+        const sessionReady = Boolean(sessionId && socket && socket.readyState === WebSocket.OPEN);
+        const hasMic = Boolean(mediaStream && captureContext);
+        startMicButton.disabled = !sessionReady || hasMic;
+        stopMicButton.disabled = !hasMic;
+        typedInput.disabled = !sessionReady;
+        sendTextButton.disabled = !sessionReady || !typedInput.value.trim();
       }
 
-      startButton.addEventListener('click', async () => {
-        if (!navigator.mediaDevices?.getUserMedia || typeof WebSocket === 'undefined' || typeof MediaRecorder === 'undefined') {
-          setStatus('This browser cannot capture audio here.', '#ff8c6b');
+      function renderChat() {
+        chatEl.innerHTML = '';
+        currentMessages.forEach((message) => {
+          const line = document.createElement('div');
+          line.className = `chat-line ${message.role}`;
+          line.textContent = `${message.role}: ${message.content}`;
+          chatEl.appendChild(line);
+        });
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+
+      function updateMessage(role, content) {
+        if (!content) {
+          return;
+        }
+
+        const lastMessage = currentMessages[currentMessages.length - 1];
+        if (lastMessage && lastMessage.role === role) {
+          if (content === lastMessage.content || content.startsWith(lastMessage.content)) {
+            lastMessage.content = content;
+          } else if (!lastMessage.content.endsWith(content)) {
+            lastMessage.content = `${lastMessage.content} ${content}`.replace(/\s+/g, ' ').trim();
+          }
+        } else {
+          currentMessages.push({ role, content });
+        }
+
+        if (role === 'user') {
+          liveEl.textContent = content;
+        }
+
+        renderChat();
+      }
+
+      function stopPlayback() {
+        playbackSources.forEach((source) => {
+          try {
+            source.onended = null;
+            source.stop();
+            source.disconnect();
+          } catch (err) {
+            console.error('Playback stop failed:', err);
+          }
+        });
+
+        playbackSources = new Set();
+        playbackNextTime = 0;
+      }
+
+      async function ensurePlaybackContext() {
+        if (!playbackContext || playbackContext.state === 'closed') {
+          playbackContext = new window.AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
+          playbackGain = playbackContext.createGain();
+          playbackGain.connect(playbackContext.destination);
+        }
+
+        if (playbackContext.state === 'suspended') {
+          await playbackContext.resume();
+        }
+
+        return playbackContext;
+      }
+
+      async function enqueuePlayback(rawChunk) {
+        const context = await ensurePlaybackContext();
+        const pcm = new Int16Array(rawChunk);
+        const float32 = new Float32Array(pcm.length);
+        for (let index = 0; index < pcm.length; index += 1) {
+          float32[index] = pcm[index] / 0x8000;
+        }
+
+        const audioBuffer = context.createBuffer(1, float32.length, OUTPUT_SAMPLE_RATE);
+        audioBuffer.copyToChannel(float32, 0);
+        const source = context.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(playbackGain || context.destination);
+
+        const startAt = Math.max(context.currentTime + 0.03, playbackNextTime || 0);
+        playbackNextTime = startAt + audioBuffer.duration;
+        playbackSources.add(source);
+
+        source.onended = () => {
+          playbackSources.delete(source);
+          try {
+            source.disconnect();
+          } catch (err) {
+            console.error('Playback cleanup failed:', err);
+          }
+
+          if (!playbackSources.size) {
+            playbackNextTime = 0;
+          }
+        };
+
+        source.start(startAt);
+      }
+
+      function downsampleBuffer(inputBuffer, inputRate, targetRate) {
+        if (targetRate === inputRate) {
+          return inputBuffer;
+        }
+
+        const ratio = inputRate / targetRate;
+        const outputLength = Math.max(1, Math.round(inputBuffer.length / ratio));
+        const output = new Float32Array(outputLength);
+        let outputOffset = 0;
+        let inputOffset = 0;
+
+        while (outputOffset < outputLength) {
+          const nextInputOffset = Math.min(inputBuffer.length, Math.round((outputOffset + 1) * ratio));
+          let accumulator = 0;
+          let count = 0;
+
+          for (let index = inputOffset; index < nextInputOffset; index += 1) {
+            accumulator += inputBuffer[index];
+            count += 1;
+          }
+
+          output[outputOffset] = count > 0 ? accumulator / count : inputBuffer[inputOffset] || 0;
+          outputOffset += 1;
+          inputOffset = nextInputOffset;
+        }
+
+        return output;
+      }
+
+      function float32ToInt16Buffer(floatBuffer) {
+        const output = new Int16Array(floatBuffer.length);
+
+        for (let index = 0; index < floatBuffer.length; index += 1) {
+          const sample = Math.max(-1, Math.min(1, floatBuffer[index]));
+          output[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+        }
+
+        return output.buffer;
+      }
+
+      async function startMicCapture() {
+        if (!socket || socket.readyState !== WebSocket.OPEN || !sessionId) {
+          setStatus('Start a live session before using the mic.', '#ff8c6b');
           return;
         }
 
         try {
           setStatus('Requesting microphone access...', '#f5a623');
-          mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          socket = new WebSocket(`ws://${window.location.host}/deepgram`);
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
 
-          socket.onopen = () => {
-            try {
-              mediaRecorder = new MediaRecorder(mediaStream, getRecorderOptions());
-              mediaRecorder.ondataavailable = (event) => {
-                if (socket.readyState === WebSocket.OPEN && event.data.size > 0) {
-                  socket.send(event.data);
-                }
-              };
+          captureContext = new window.AudioContext();
+          await captureContext.resume();
+          captureSource = captureContext.createMediaStreamSource(mediaStream);
+          captureProcessor = captureContext.createScriptProcessor(4096, 1, 1);
+          captureMute = captureContext.createGain();
+          captureMute.gain.value = 0;
 
-              mediaRecorder.start(250);
-              startButton.disabled = true;
-              stopButton.disabled = false;
-              setStatus('Recording. Speak naturally.', '#3ddc84');
-            } catch (err) {
-              console.error('Recorder setup failed:', err);
-              setStatus('Audio capture could not start.', '#ff8c6b');
-              cleanup();
-            }
-          };
-
-          socket.onmessage = (event) => {
-            let payload;
-            try {
-              payload = JSON.parse(event.data);
-            } catch (err) {
-              console.error('Failed to parse transcript payload:', err);
+          captureProcessor.onaudioprocess = (event) => {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
               return;
             }
 
-            if (payload.type === 'error') {
-              setStatus(payload.message || 'Voice is unavailable.', '#ff8c6b');
-              cleanup();
-              return;
-            }
-
-            const transcript = payload.channel?.alternatives?.[0]?.transcript;
-            if (!transcript) {
-              return;
-            }
-
-            liveEl.textContent = transcript;
-
-            if (payload.is_final) {
-              const line = document.createElement('div');
-              line.className = 'final-line';
-              line.textContent = transcript;
-              finalEl.prepend(line);
-              liveEl.textContent = '';
-            }
+            const inputData = event.inputBuffer.getChannelData(0);
+            const downsampled = downsampleBuffer(inputData, captureContext.sampleRate, INPUT_SAMPLE_RATE);
+            const pcmChunk = float32ToInt16Buffer(downsampled);
+            socket.send(pcmChunk);
           };
 
-          socket.onerror = (err) => {
-            console.error('Socket error:', err);
-            setStatus('Voice connection failed.', '#ff8c6b');
-            cleanup();
-          };
-
-          socket.onclose = () => {
-            if (stopButton.disabled) {
-              return;
-            }
-
-            setStatus('Voice connection closed.', '#ff8c6b');
-            cleanup();
-          };
+          captureSource.connect(captureProcessor);
+          captureProcessor.connect(captureMute);
+          captureMute.connect(captureContext.destination);
+          setStatus('Listening. Speak naturally.', '#3ddc84');
+          logEvent('Microphone capture started');
+          syncControls();
         } catch (err) {
-          console.error('Microphone error:', err);
+          console.error('Mic start failed:', err);
           setStatus('Microphone access failed. Check Chrome permissions.', '#ff8c6b');
-          cleanup();
+          stopMicCapture();
         }
+      }
+
+      async function stopMicCapture() {
+        if (captureProcessor) {
+          captureProcessor.onaudioprocess = null;
+          try { captureProcessor.disconnect(); } catch (err) { console.error(err); }
+        }
+
+        if (captureSource) {
+          try { captureSource.disconnect(); } catch (err) { console.error(err); }
+        }
+
+        if (captureMute) {
+          try { captureMute.disconnect(); } catch (err) { console.error(err); }
+        }
+
+        mediaStream?.getTracks().forEach((track) => track.stop());
+        mediaStream = null;
+        captureSource = null;
+        captureProcessor = null;
+        captureMute = null;
+
+        if (captureContext) {
+          try {
+            await captureContext.close();
+          } catch (err) {
+            console.error('Capture context close failed:', err);
+          }
+        }
+
+        captureContext = null;
+        syncControls();
+      }
+
+      async function closeSession() {
+        await stopMicCapture();
+        stopPlayback();
+
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+          try {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: 'FinishSession' }));
+            }
+            socket.close(1000, 'manual_close');
+          } catch (err) {
+            console.error('Socket close failed:', err);
+          }
+        }
+
+        socket = null;
+        sessionId = '';
+        currentMessages = [];
+        liveEl.textContent = '';
+        renderChat();
+        syncControls();
+      }
+
+      async function startSession() {
+        await closeSession();
+        currentMessages = [];
+        renderChat();
+        liveEl.textContent = '';
+
+        const scenarioId = scenarioInput.value.trim() || 'duplicate-orders';
+        setStatus('Connecting live interviewer...', '#f5a623');
+        logEvent(`Opening live session for scenario "${scenarioId}"`);
+
+        socket = new WebSocket(`ws://${window.location.host}/api/interview/live`);
+        socket.binaryType = 'arraybuffer';
+
+        socket.onopen = () => {
+          socket.send(JSON.stringify({
+            type: 'StartSession',
+            scenarioId,
+          }));
+        };
+
+        socket.onmessage = async (event) => {
+          if (event.data instanceof ArrayBuffer) {
+            await enqueuePlayback(event.data);
+            return;
+          }
+
+          let payload = null;
+          try {
+            payload = JSON.parse(event.data);
+          } catch (err) {
+            console.error('Failed to parse harness payload:', err);
+            return;
+          }
+
+          if (payload.type === 'SessionReady') {
+            sessionId = payload.sessionId || '';
+            syncControls();
+            setStatus(`Live interviewer ready: ${sessionId}`, '#3ddc84');
+            logEvent(`Session ready: ${sessionId}`);
+            return;
+          }
+
+          if (payload.type === 'ConversationText') {
+            updateMessage(payload.role, payload.content);
+            logEvent(`ConversationText (${payload.role})`);
+            return;
+          }
+
+          if (payload.type === 'UserStartedSpeaking') {
+            stopPlayback();
+            setStatus('User started speaking', '#3ddc84');
+            logEvent('UserStartedSpeaking');
+            return;
+          }
+
+          if (payload.type === 'AgentThinking') {
+            liveEl.textContent = '';
+            stopMicCapture();
+            setStatus('Interviewer is thinking...', '#5b9cf6');
+            logEvent('AgentThinking');
+            return;
+          }
+
+          if (payload.type === 'AgentStartedSpeaking') {
+            setStatus('Interviewer is speaking...', '#5b9cf6');
+            logEvent('AgentStartedSpeaking');
+            return;
+          }
+
+          if (payload.type === 'AgentAudioDone') {
+            setStatus('Interviewer finished speaking.', '#888');
+            logEvent('AgentAudioDone');
+            return;
+          }
+
+          if (payload.type === 'InjectionRefused') {
+            setStatus('Interviewer was still responding. Try again.', '#ff8c6b');
+            logEvent('InjectionRefused');
+            return;
+          }
+
+          if (payload.type === 'Warning') {
+            logEvent(`Warning: ${payload.message || payload.description || 'warning'}`);
+            return;
+          }
+
+          if (payload.type === 'Error') {
+            setStatus(payload.message || 'Live interviewer error.', '#ff8c6b');
+            logEvent(`Error: ${payload.message || payload.description || 'unknown error'}`);
+          }
+        };
+
+        socket.onerror = () => {
+          setStatus('The live interviewer connection failed.', '#ff8c6b');
+          logEvent('Socket error');
+        };
+
+        socket.onclose = () => {
+          setStatus('The live interviewer connection closed.', '#ff8c6b');
+          logEvent('Socket closed');
+          syncControls();
+        };
+      }
+
+      startSessionButton.addEventListener('click', () => {
+        startSession();
       });
 
-      stopButton.addEventListener('click', () => {
-        setStatus('Stopped.', '#888');
-        cleanup();
+      startMicButton.addEventListener('click', () => {
+        startMicCapture();
       });
+
+      stopMicButton.addEventListener('click', () => {
+        stopMicCapture();
+        setStatus('Microphone stopped. Waiting for turn completion...', '#888');
+        logEvent('Microphone capture stopped');
+      });
+
+      typedInput.addEventListener('input', () => {
+        syncControls();
+      });
+
+      sendTextButton.addEventListener('click', () => {
+        const content = typedInput.value.trim();
+        if (!content || !socket || socket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+
+        stopPlayback();
+        updateMessage('user', content);
+        socket.send(JSON.stringify({
+          type: 'InjectUserMessage',
+          content,
+        }));
+        typedInput.value = '';
+        syncControls();
+        setStatus('Typed message sent.', '#5b9cf6');
+        logEvent('InjectUserMessage');
+      });
+
+      window.addEventListener('beforeunload', () => {
+        closeSession();
+      });
+
+      syncControls();
     </script>
   </body>
 </html>

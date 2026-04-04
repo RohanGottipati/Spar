@@ -4,7 +4,7 @@ const DIFFICULTY_LABELS = {
   hard:   { label: 'Hard',   color: '#ff5c35' },
 };
 
-export default function ScenarioSelect({ scenarios, difficulty, onSelect, onBack }) {
+export default function ScenarioSelect({ scenarios, difficulty, notice = '', onSelect, onBack }) {
   const { label, color } = DIFFICULTY_LABELS[difficulty] ?? { label: difficulty, color: '#ff5c35' };
 
   return (
@@ -33,6 +33,23 @@ export default function ScenarioSelect({ scenarios, difficulty, onSelect, onBack
       <p style={{ color: '#555', fontSize: 15, marginBottom: 48, textAlign: 'center' }}>
         Each scenario is a real-world production bug. Pick one to investigate.
       </p>
+
+      {notice && (
+        <div style={{
+          maxWidth: 600,
+          width: '100%',
+          marginBottom: 24,
+          padding: '14px 16px',
+          borderRadius: 12,
+          background: '#2a1611',
+          border: '1px solid #5a2d1f',
+          color: '#ffb39d',
+          fontSize: 14,
+          lineHeight: 1.5,
+        }}>
+          {notice}
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 600, width: '100%' }}>
         {scenarios.length === 0 && (

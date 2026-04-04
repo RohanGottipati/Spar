@@ -27,6 +27,16 @@ export function buildWebSocketUrl(path) {
 
   if (typeof window !== 'undefined') {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+    // In local Vite dev, connect websocket features straight to the backend
+    // rather than relying on the dev-server websocket proxy.
+    if (
+      window.location.port === '5173'
+      && (normalizedPath.startsWith('/api/') || normalizedPath === '/deepgram')
+    ) {
+      return `${protocol}//${window.location.hostname}:3001${normalizedPath}`;
+    }
+
     return `${protocol}//${window.location.host}${normalizedPath}`;
   }
 
