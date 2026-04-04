@@ -68,7 +68,7 @@ function getLanguageForFile(filename) {
   return 'javascript';
 }
 
-export default function Interview({ scenario, onFinish }) {
+export default function Interview({ scenario, onFinish, onBack, onScenarioUnavailable }) {
   const visibleFilesMap = getVisibleFilesMap(scenario);
   const visibleFiles = Object.keys(visibleFilesMap);
   const initialFile = visibleFiles[0] || '';
@@ -106,6 +106,7 @@ export default function Interview({ scenario, onFinish }) {
   } = useLiveVoiceInterview(scenario, {
     onFinalMessage: handleTrackedMessage,
     onFinalUtterance: handleTrackedUtterance,
+    onScenarioNotFound: onScenarioUnavailable,
   });
 
   useEffect(() => {
@@ -204,6 +205,11 @@ export default function Interview({ scenario, onFinish }) {
   const handleTypedSubmit = useCallback((text) => {
     sendTextMessage(text);
   }, [sendTextMessage]);
+
+  const handleBack = useCallback(() => {
+    finishSession();
+    onBack?.();
+  }, [finishSession, onBack]);
 
   const handleFinish = useCallback(() => {
     if (isFinishing) {
@@ -308,9 +314,28 @@ export default function Interview({ scenario, onFinish }) {
 
       <div style={{ width: 380, display: 'flex', flexDirection: 'column', background: '#111' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#ff5c35', letterSpacing: '0.1em' }}>SPAR</div>
-            <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{scenario.title}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {onBack && (
+              <button
+                onClick={handleBack}
+                style={{
+                  background: 'transparent',
+                  color: '#666',
+                  border: '1px solid #333',
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  lineHeight: 1,
+                }}
+              >
+                ← Back
+              </button>
+            )}
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#ff5c35', letterSpacing: '0.1em' }}>SPAR</div>
+              <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{scenario.title}</div>
+            </div>
           </div>
           <Timer seconds={scenario.timeLimit} onExpire={handleFinish} />
         </div>

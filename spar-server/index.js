@@ -15,6 +15,7 @@ const {
 } = require('./lib/backboard');
 const {
   buildScenarioAnswerKey,
+  listClientScenarios,
   getScenarioById,
   getVisibleFiles,
 } = require('./lib/scenarios');
@@ -143,6 +144,19 @@ function buildScenarioForReport(scenario) {
     visibleFiles: getVisibleFiles(scenario),
     answerKey: buildScenarioAnswerKey(scenario),
   };
+}
+
+function buildScenarioNotFoundPayload(scenarioId = null) {
+  const payload = {
+    code: 'SCENARIO_NOT_FOUND',
+    message: 'Scenario not found.',
+  };
+
+  if (isNonEmptyString(scenarioId) && process.env.NODE_ENV !== 'production') {
+    payload.scenarioId = scenarioId.trim();
+  }
+
+  return payload;
 }
 
 function buildVoiceAgentPrompt(scenario) {
@@ -686,7 +700,10 @@ liveInterviewWss.on('connection', (clientSocket) => {
       try {
         const scenario = await getScenarioById(payload.scenarioId.trim());
         if (!scenario) {
-          safeSendJson(clientSocket, { type: 'Error', message: 'Scenario not found.' });
+          safeSendJson(clientSocket, {
+            type: 'Error',
+            ...buildScenarioNotFoundPayload(payload.scenarioId),
+          });
           return;
         }
 
@@ -782,9 +799,9 @@ wss.on('connection', (clientSocket) => {
     { headers: { Authorization: `Token ${process.env.DEEPGRAM_API_KEY}` } }
   );
 
-  clientSocket.on('message', (data) => {
+  clientSocket.on('message', (data, isBinary) => {
     if (deepgramSocket.readyState === WebSocket.OPEN) {
-      deepgramSocket.send(data);
+      deepgramSocket.send(data, { binary: isBinary });
     }
   });
 
@@ -851,7 +868,7 @@ app.post('/api/interview/sessions', async (req, res) => {
 
   const scenario = await getScenarioById(scenarioId.trim());
   if (!scenario) {
-    return res.status(404).json({ error: 'Scenario not found' });
+    return res.status(404).json({ error: 'Scenario not found', code: 'SCENARIO_NOT_FOUND' });
   }
 
   try {
@@ -928,7 +945,7 @@ app.post('/api/reports', async (req, res) => {
 
   const scenario = await getScenarioById(scenarioId.trim());
   if (!scenario) {
-    return res.status(404).json({ error: 'Scenario not found' });
+    return res.status(404).json({ error: 'Scenario not found', code: 'SCENARIO_NOT_FOUND' });
   }
 
   try {
@@ -994,10 +1011,29 @@ app.post('/api/reports', async (req, res) => {
       finalReport = buildFallbackReport({ dossier, analyses });
     }
 
-    return res.json({ report: finalReport });
+    return res.json({
+      report: {
+        ...finalReport,
+        scenarioSummary: {
+          title: scenario.title,
+          bugExplanation: scenario.bugExplanation,
+          fixSummary: scenario.fixSummary,
+        },
+      },
+    });
   } catch (err) {
     console.error('Failed to generate report:', err);
     return res.status(500).json({ error: REPORT_UNAVAILABLE_MESSAGE });
+  }
+});
+
+app.get('/api/scenarios', async (_req, res) => {
+  try {
+    const scenarios = await listClientScenarios();
+    return res.json(scenarios);
+  } catch (err) {
+    console.error('Failed to load scenarios:', err);
+    return res.status(500).json({ error: 'Scenario catalog unavailable' });
   }
 });
 

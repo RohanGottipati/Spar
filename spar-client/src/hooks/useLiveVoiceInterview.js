@@ -117,7 +117,14 @@ async function createCaptureGraph(stream, onAudioChunk) {
   };
 }
 
-export function useLiveVoiceInterview(scenario, { onFinalMessage, onFinalUtterance } = {}) {
+export function useLiveVoiceInterview(
+  scenario,
+  {
+    onFinalMessage,
+    onFinalUtterance,
+    onScenarioNotFound,
+  } = {},
+) {
   const [sessionId, setSessionId] = useState('');
   const [messages, setMessages] = useState([]);
   const [isReady, setIsReady] = useState(false);
@@ -146,6 +153,7 @@ export function useLiveVoiceInterview(scenario, { onFinalMessage, onFinalUtteran
 
   const onFinalMessageRef = useRef(onFinalMessage);
   const onFinalUtteranceRef = useRef(onFinalUtterance);
+  const onScenarioNotFoundRef = useRef(onScenarioNotFound);
 
   useEffect(() => {
     onFinalMessageRef.current = onFinalMessage;
@@ -154,6 +162,10 @@ export function useLiveVoiceInterview(scenario, { onFinalMessage, onFinalUtteran
   useEffect(() => {
     onFinalUtteranceRef.current = onFinalUtterance;
   }, [onFinalUtterance]);
+
+  useEffect(() => {
+    onScenarioNotFoundRef.current = onScenarioNotFound;
+  }, [onScenarioNotFound]);
 
   const commitMessages = useCallback((updater) => {
     const nextMessages = typeof updater === 'function' ? updater(messagesRef.current) : updater;
@@ -662,14 +674,26 @@ export function useLiveVoiceInterview(scenario, { onFinalMessage, onFinalUtteran
       }
 
       if (payload.type === 'Error') {
-        console.error('Live interview error:', payload.message || payload.description || payload);
+        const errorCode = typeof payload.code === 'string' ? payload.code : '';
+        const errorMessage = typeof payload.message === 'string'
+          ? payload.message
+          : 'The live interviewer is unavailable right now.';
+
+        console.error('Live interview error:', errorMessage || payload.description || payload);
         sessionReadyRef.current = false;
         setIsReady(false);
-        setError(typeof payload.message === 'string' ? payload.message : 'The live interviewer is unavailable right now.');
+        setError(errorMessage);
         setConnectionState('error');
         setIsThinking(false);
         setIsAgentSpeaking(false);
         await stopCapture();
+
+        if (errorCode === 'SCENARIO_NOT_FOUND') {
+          onScenarioNotFoundRef.current?.({
+            scenarioId: typeof payload.scenarioId === 'string' ? payload.scenarioId : scenario.id,
+            message: errorMessage,
+          });
+        }
       }
     };
 
