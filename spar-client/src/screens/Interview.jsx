@@ -50,7 +50,7 @@ function MonacoLoadingFallback({ onTimeout }) {
   );
 }
 
-export default function Interview({ scenario, onFinish }) {
+export default function Interview({ scenario, onFinish, onBack }) {
   const [sessionStartTime] = useState(() => Date.now());
   const [activeFile, setActiveFile] = useState(Object.keys(scenario.files)[0]);
   const [fileContents, setFileContents] = useState({ ...scenario.files });
@@ -220,9 +220,24 @@ export default function Interview({ scenario, onFinish }) {
 
       <div style={{ width: 380, display: 'flex', flexDirection: 'column', background: '#111' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#ff5c35', letterSpacing: '0.1em' }}>SPAR</div>
-            <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{scenario.title}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {onBack && (
+              <button
+                onClick={() => { stopListening(); onBack(); }}
+                title="Exit interview"
+                style={{
+                  background: 'transparent', border: '1px solid #333', color: '#555',
+                  padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                  fontFamily: 'sans-serif', fontSize: 12,
+                }}
+              >
+                ← Back
+              </button>
+            )}
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#ff5c35', letterSpacing: '0.1em' }}>SPAR</div>
+              <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{scenario.title}</div>
+            </div>
           </div>
           <Timer seconds={scenario.timeLimit} onExpire={handleFinish} />
         </div>
