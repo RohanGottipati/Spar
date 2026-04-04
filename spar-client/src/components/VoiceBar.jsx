@@ -4,8 +4,10 @@ export default function VoiceBar({
   liveTranscript,
   isListening,
   isThinking = false,
+  isAgentSpeaking = false,
   connectionState = 'idle',
   errorMessage = '',
+  sessionReady = false,
   disabled = false,
   disableFinish = false,
   onStart,
@@ -14,12 +16,18 @@ export default function VoiceBar({
   onSubmitText,
 }) {
   const [typedInput, setTypedInput] = useState('');
-  const canSendTypedMessage = typedInput.trim().length > 0 && !isThinking && !disabled;
+  const voiceButtonDisabled = disabled || connectionState === 'error';
+  const canSendTypedMessage = typedInput.trim().length > 0
+    && sessionReady
+    && !isThinking
+    && !isAgentSpeaking
+    && !disabled
+    && connectionState !== 'error';
 
   const handleTypedSubmit = (event) => {
     event.preventDefault();
     const trimmedInput = typedInput.trim();
-    if (!trimmedInput || isThinking || disabled) {
+    if (!trimmedInput || !canSendTypedMessage) {
       return;
     }
 
@@ -33,18 +41,24 @@ export default function VoiceBar({
   if (errorMessage) {
     statusText = errorMessage;
     statusColor = '#ff8c6b';
-  } else if (isThinking) {
-    statusText = 'Interviewer is responding...';
+  } else if (isAgentSpeaking) {
+    statusText = 'Interviewer is speaking...';
     statusColor = '#5b9cf6';
-  } else if (connectionState === 'requesting') {
+  } else if (isThinking) {
+    statusText = 'Interviewer is working through your answer...';
+    statusColor = '#5b9cf6';
+  } else if (connectionState === 'preparing') {
+    statusText = 'Connecting interviewer...';
+    statusColor = '#f5a623';
+  } else if (connectionState === 'requesting-mic') {
     statusText = 'Requesting microphone access...';
     statusColor = '#f5a623';
-  } else if (connectionState === 'connecting') {
-    statusText = 'Connecting to live transcription...';
-    statusColor = '#f5a623';
   } else if (isListening) {
-    statusText = 'Recording. Think out loud naturally.';
+    statusText = 'Listening. Think out loud naturally.';
     statusColor = '#3ddc84';
+  } else if (sessionReady) {
+    statusText = 'Start talking, or type if you prefer.';
+    statusColor = '#666';
   }
 
   return (
@@ -71,7 +85,7 @@ export default function VoiceBar({
       <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
         <button
           onClick={isListening ? onStop : onStart}
-          disabled={disabled || (isThinking && !isListening)}
+          disabled={voiceButtonDisabled}
           style={{
             flex: 1,
             padding: '12px 0',
@@ -81,9 +95,9 @@ export default function VoiceBar({
             borderRadius: 8,
             fontWeight: 700,
             fontSize: 14,
-            cursor: disabled || (isThinking && !isListening) ? 'not-allowed' : 'pointer',
+            cursor: voiceButtonDisabled ? 'not-allowed' : 'pointer',
             transition: 'background 0.15s',
-            opacity: disabled || (isThinking && !isListening) ? 0.6 : 1,
+            opacity: voiceButtonDisabled ? 0.6 : 1,
           }}
         >
           {isListening ? 'Stop talking' : 'Start talking'}
@@ -113,7 +127,7 @@ export default function VoiceBar({
           type="text"
           value={typedInput}
           onChange={(event) => setTypedInput(event.target.value)}
-          disabled={disabled}
+          disabled={disabled || !sessionReady || connectionState === 'error'}
           placeholder="Text fallback if the mic fails..."
           style={{
             flex: 1,

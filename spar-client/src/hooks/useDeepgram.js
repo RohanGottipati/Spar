@@ -3,6 +3,7 @@ import { buildWebSocketUrl } from '../lib/api';
 
 const DEEPGRAM_WS_URL = buildWebSocketUrl('/deepgram');
 const RECORDER_TIMESLICE_MS = 250;
+const FINAL_TRANSCRIPT_GRACE_MS = 1200;
 
 function getRecorderOptions() {
   if (typeof MediaRecorder === 'undefined') {
@@ -59,6 +60,33 @@ async function readSocketMessageData(rawData) {
   return String(rawData);
 }
 
+function normalizeTranscript(text) {
+  return typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
+}
+
+function mergeTranscript(existingText, nextText) {
+  const existing = normalizeTranscript(existingText);
+  const next = normalizeTranscript(nextText);
+
+  if (!existing) {
+    return next;
+  }
+
+  if (!next) {
+    return existing;
+  }
+
+  if (next === existing || next.startsWith(existing)) {
+    return next;
+  }
+
+  if (existing.startsWith(next) || existing.endsWith(next)) {
+    return existing;
+  }
+
+  return `${existing} ${next}`.replace(/\s+/g, ' ').trim();
+}
+
 export function useDeepgram({ onFinalTranscript }) {
   const [isListening, setIsListening] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState('');
@@ -68,8 +96,19 @@ export function useDeepgram({ onFinalTranscript }) {
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const sessionIdRef = useRef(0);
+  const pendingTranscriptRef = useRef('');
+  const finalizeTimerRef = useRef(null);
+
+  const clearFinalizeTimer = useCallback(() => {
+    if (finalizeTimerRef.current) {
+      window.clearTimeout(finalizeTimerRef.current);
+      finalizeTimerRef.current = null;
+    }
+  }, []);
 
   const teardownResources = useCallback(() => {
+    clearFinalizeTimer();
+
     const recorder = recorderRef.current;
     recorderRef.current = null;
     if (recorder && recorder.state !== 'inactive') {
@@ -95,19 +134,25 @@ export function useDeepgram({ onFinalTranscript }) {
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
     }
-  }, []);
+  }, [clearFinalizeTimer]);
 
-  const stopListening = useCallback(() => {
+  const stopListening = useCallback(({ submitPending = false } = {}) => {
+    const finalTranscript = submitPending ? normalizeTranscript(pendingTranscriptRef.current) : '';
     sessionIdRef.current += 1;
+    pendingTranscriptRef.current = '';
     teardownResources();
     setIsListening(false);
     setLiveTranscript('');
     setConnectionState('idle');
     setError('');
-  }, [teardownResources]);
+    if (submitPending && finalTranscript) {
+      onFinalTranscript(finalTranscript);
+    }
+  }, [onFinalTranscript, teardownResources]);
 
   const failSession = useCallback((message) => {
     sessionIdRef.current += 1;
+    pendingTranscriptRef.current = '';
     teardownResources();
     setIsListening(false);
     setLiveTranscript('');
@@ -127,6 +172,8 @@ export function useDeepgram({ onFinalTranscript }) {
 
     setError('');
     setLiveTranscript('');
+    pendingTranscriptRef.current = '';
+    clearFinalizeTimer();
     setConnectionState('requesting');
     const sessionId = sessionIdRef.current + 1;
     sessionIdRef.current = sessionId;
@@ -197,15 +244,37 @@ export function useDeepgram({ onFinalTranscript }) {
           return;
         }
 
+        if (data?.type === 'UtteranceEnd') {
+          if (pendingTranscriptRef.current) {
+            clearFinalizeTimer();
+            finalizeTimerRef.current = window.setTimeout(() => {
+              if (sessionIdRef.current === sessionId) {
+                stopListening({ submitPending: true });
+              }
+            }, FINAL_TRANSCRIPT_GRACE_MS);
+          }
+
+          return;
+        }
+
         const transcript = data.channel?.alternatives?.[0]?.transcript;
         const isFinal = data.is_final;
+        const normalizedTranscript = normalizeTranscript(transcript);
 
-        if (transcript) {
-          setLiveTranscript(transcript);
-          if (isFinal && transcript.trim().length > 0) {
-            onFinalTranscript(transcript);
-            setLiveTranscript('');
+        if (normalizedTranscript) {
+          if (isFinal) {
+            pendingTranscriptRef.current = mergeTranscript(pendingTranscriptRef.current, normalizedTranscript);
+            setLiveTranscript(pendingTranscriptRef.current);
+          } else {
+            setLiveTranscript(mergeTranscript(pendingTranscriptRef.current, normalizedTranscript));
           }
+
+          clearFinalizeTimer();
+          finalizeTimerRef.current = window.setTimeout(() => {
+            if (sessionIdRef.current === sessionId) {
+              stopListening({ submitPending: true });
+            }
+          }, FINAL_TRANSCRIPT_GRACE_MS);
         }
       };
 
@@ -229,7 +298,7 @@ export function useDeepgram({ onFinalTranscript }) {
       console.error('Mic access denied:', err);
       failSession(describeVoiceError(err));
     }
-  }, [connectionState, failSession, onFinalTranscript, stopListening]);
+  }, [clearFinalizeTimer, connectionState, failSession, stopListening]);
 
   useEffect(() => () => {
     teardownResources();
