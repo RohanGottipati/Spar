@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { buildWebSocketUrl } from '../lib/api';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
-const DEEPGRAM_WS_URL = `${API_BASE_URL.replace(/^http/i, 'ws')}/deepgram`;
+const DEEPGRAM_WS_URL = buildWebSocketUrl('/deepgram');
 const RECORDER_TIMESLICE_MS = 250;
 
 function getRecorderOptions() {
@@ -37,6 +37,26 @@ function describeVoiceError(err) {
   }
 
   return 'Voice is unavailable right now. Use the text fallback.';
+}
+
+async function readSocketMessageData(rawData) {
+  if (typeof rawData === 'string') {
+    return rawData;
+  }
+
+  if (rawData instanceof Blob) {
+    return rawData.text();
+  }
+
+  if (rawData instanceof ArrayBuffer) {
+    return new TextDecoder().decode(rawData);
+  }
+
+  if (ArrayBuffer.isView(rawData)) {
+    return new TextDecoder().decode(rawData);
+  }
+
+  return String(rawData);
 }
 
 export function useDeepgram({ onFinalTranscript }) {
@@ -158,14 +178,15 @@ export function useDeepgram({ onFinalTranscript }) {
         }
       };
 
-      socket.onmessage = (event) => {
+      socket.onmessage = async (event) => {
         if (sessionIdRef.current !== sessionId) {
           return;
         }
 
         let data;
         try {
-          data = JSON.parse(event.data);
+          const messageText = await readSocketMessageData(event.data);
+          data = JSON.parse(messageText);
         } catch (err) {
           console.error('Failed to parse Deepgram payload:', err);
           return;

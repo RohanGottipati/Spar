@@ -4,6 +4,7 @@ import DifficultySelect from './screens/DifficultySelect';
 import ScenarioSelect from './screens/ScenarioSelect';
 import Interview from './screens/Interview';
 import Report from './screens/Report';
+import ReportLoading from './screens/ReportLoading';
 import { scenarios } from './data/scenarios';
 
 export default function App() {
@@ -11,6 +12,7 @@ export default function App() {
   const [selectedDifficulty, setSelectedDifficulty] = useState(null);
   const [selectedScenario, setSelectedScenario] = useState(null);
   const [report, setReport] = useState(null);
+  const [reportRequest, setReportRequest] = useState(null);
 
   if (screen === 'landing') {
     return (
@@ -42,6 +44,8 @@ export default function App() {
         difficulty={selectedDifficulty}
         onSelect={(scenario) => {
           setSelectedScenario(scenario);
+          setReport(null);
+          setReportRequest(null);
           setScreen('interview');
         }}
         onBack={() => setScreen('difficulty')}
@@ -53,14 +57,49 @@ export default function App() {
     if (!selectedScenario) return null;
     return (
       <Interview
+        key={selectedScenario.id}
         scenario={selectedScenario}
-        onFinish={(reportData) => { setReport(reportData); setScreen('report'); }}
+        onFinish={(reportData) => {
+          setReportRequest(reportData);
+          setReport(null);
+          setScreen('report-loading');
+        }}
         onBack={() => setScreen('scenario')}
       />
     );
   }
 
-  if (screen === 'report') {
-    return <Report report={report} scenario={selectedScenario} onRetry={() => setScreen('landing')} />;
+  if (screen === 'report-loading') {
+    return (
+      <ReportLoading
+        payload={reportRequest}
+        scenario={selectedScenario}
+        onComplete={(nextReport) => {
+          setReport(nextReport);
+          setScreen('report');
+        }}
+        onBack={() => {
+          setReport(null);
+          setReportRequest(null);
+          setScreen('landing');
+        }}
+      />
+    );
   }
+
+  if (screen === 'report') {
+    return (
+      <Report
+        report={report}
+        scenario={selectedScenario}
+        onRetry={() => {
+          setReport(null);
+          setReportRequest(null);
+          setScreen('landing');
+        }}
+      />
+    );
+  }
+
+  return null;
 }

@@ -1,17 +1,42 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const { createServer } = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
+const { ensureAssistants } = require('./lib/assistants');
+const {
+  addMessage,
+  createThread,
+  extractContent,
+  getBackboardConfig,
+  isBackboardConfigured,
+} = require('./lib/backboard');
+const {
+  buildLiveScenarioContext,
+  buildScenarioAnswerKey,
+  getScenarioById,
+  getVisibleFiles,
+} = require('./lib/scenarios');
+const {
+  buildAnalyzerPrompt,
+  buildFallbackReport,
+  buildReportDossier,
+  buildSynthesizerPrompt,
+  sanitizeAnalyzerOutput,
+  sanitizeFinalReport,
+} = require('./lib/reporting');
 
 const app = express();
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const VOICE_FALLBACK_MESSAGE = 'Voice is unavailable right now. Use the text fallback.';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const INTERVIEW_UNAVAILABLE_MESSAGE = 'Interview service unavailable';
+const REPORT_UNAVAILABLE_MESSAGE = 'Report generation unavailable';
+const activeSessions = new Map();
 
 app.use(cors({ origin: CLIENT_ORIGIN }));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const server = createServer(app);
@@ -22,12 +47,111 @@ function safeSendJson(socket, payload) {
   }
 }
 
+function normalizeWebSocketMessage(data, isBinary = false) {
+  if (isBinary) {
+    return data;
+  }
+
+  if (typeof data === 'string') {
+    return data;
+  }
+
+  if (Buffer.isBuffer(data)) {
+    return data.toString('utf8');
+  }
+
+  return data;
+}
+
+function createId(prefix) {
+  if (typeof crypto.randomUUID === 'function') {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildOpeningMessage(scenario) {
+  return `Alright — ${scenario.description}. Take a look at the codebase and walk me through where you want to start.`;
+}
+
+function buildSeedMessage(scenario) {
+  return JSON.stringify({
+    type: 'session_context',
+    instructions: 'This message seeds scenario context for the interviewer. It is not a candidate utterance.',
+    scenario: buildLiveScenarioContext(scenario),
+  });
+}
+
+function getThreadId(value) {
+  return value?.thread_id || value?.id || null;
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function buildScenarioForReport(scenario) {
+  return {
+    id: scenario.id,
+    title: scenario.title,
+    company: scenario.company,
+    description: scenario.description,
+    difficulty: scenario.difficulty,
+    timeLimit: scenario.timeLimit,
+    visibleFiles: getVisibleFiles(scenario),
+    answerKey: buildScenarioAnswerKey(scenario),
+  };
+}
+
+async function runAssistantThread({ assistantId, content, provider, model, metadata }) {
+  const thread = await createThread(assistantId);
+  const threadId = getThreadId(thread);
+
+  if (!threadId) {
+    throw new Error('Backboard thread creation did not return a thread ID');
+  }
+
+  const response = await addMessage(threadId, {
+    content,
+    llm_provider: provider,
+    model_name: model,
+    stream: false,
+    memory: 'off',
+    web_search: 'off',
+    metadata,
+  });
+
+  const reply = extractContent(response);
+  if (!reply) {
+    throw new Error('Backboard assistant response was empty');
+  }
+
+  return reply;
+}
+
+function getReportAgentMappings(assistantIds) {
+  return [
+    ['code_behavior', assistantIds.codeBehavior],
+    ['communication_quality', assistantIds.communicationQuality],
+    ['interviewer_dynamic', assistantIds.interviewerDynamic],
+    ['bug_fix_quality', assistantIds.bugFixQuality],
+  ];
+}
+
 app.get('/health', (_req, res) => {
+  const backboard = getBackboardConfig();
+
   res.json({
     ok: true,
-    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     deepgramConfigured: Boolean(process.env.DEEPGRAM_API_KEY),
-    geminiModel: GEMINI_MODEL,
+    backboardConfigured: isBackboardConfigured(),
+    backboardBaseUrl: backboard.baseUrl,
+    backboardLiveProvider: backboard.liveProvider,
+    backboardLiveModel: backboard.liveModel,
+    backboardReportProvider: backboard.reportProvider,
+    backboardReportModel: backboard.reportModel,
+    activeSessionCount: activeSessions.size,
   });
 });
 
@@ -55,7 +179,7 @@ wss.on('connection', (clientSocket) => {
 
   deepgramSocket.on('message', (data, isBinary) => {
     if (clientSocket.readyState === WebSocket.OPEN) {
-      clientSocket.send(data, { binary: isBinary });
+      clientSocket.send(normalizeWebSocketMessage(data, isBinary), { binary: isBinary });
     }
   });
 
@@ -75,59 +199,195 @@ wss.on('connection', (clientSocket) => {
   clientSocket.on('error', (err) => console.error('Client socket error:', err));
 });
 
-app.post('/api/chat', async (req, res) => {
-  const { messages, systemPrompt } = req.body;
-  const hasValidPrompt = typeof systemPrompt === 'string' && systemPrompt.trim().length > 0;
-  const hasValidMessages = Array.isArray(messages) && messages.every((message) => (
-    message
-    && (message.role === 'user' || message.role === 'assistant')
-    && typeof message.content === 'string'
-    && message.content.trim().length > 0
-  ));
+app.post('/api/interview/sessions', async (req, res) => {
+  const { scenarioId } = req.body || {};
 
-  if (!hasValidPrompt || !hasValidMessages) {
-    return res.status(400).json({ error: 'Invalid chat payload' });
+  if (!isNonEmptyString(scenarioId)) {
+    return res.status(400).json({ error: 'Invalid session payload' });
   }
 
-  if (!process.env.GEMINI_API_KEY) {
-    console.error('Gemini API key is not configured');
-    return res.status(500).json({ error: 'AI unavailable' });
+  if (!isBackboardConfigured()) {
+    return res.status(500).json({ error: INTERVIEW_UNAVAILABLE_MESSAGE });
+  }
+
+  const scenario = await getScenarioById(scenarioId.trim());
+  if (!scenario) {
+    return res.status(404).json({ error: 'Scenario not found' });
   }
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
-          contents: messages.map((message) => ({
-            role: message.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: message.content }],
-          })),
-          generationConfig: { maxOutputTokens: 200, temperature: 0.6 },
-        }),
-      }
+    const assistantIds = await ensureAssistants();
+    const thread = await createThread(assistantIds.liveInterviewer);
+    const threadId = getThreadId(thread);
+
+    if (!threadId) {
+      throw new Error('Backboard thread creation did not return a thread ID');
+    }
+
+    const sessionId = createId('session');
+    await addMessage(threadId, {
+      content: buildSeedMessage(scenario),
+      stream: false,
+      memory: 'off',
+      send_to_llm: 'false',
+      metadata: {
+        route: 'interview_seed',
+        sessionId,
+        scenarioId: scenario.id,
+      },
+    });
+
+    activeSessions.set(sessionId, {
+      sessionId,
+      scenarioId: scenario.id,
+      threadId,
+      createdAt: Date.now(),
+    });
+
+    return res.json({
+      sessionId,
+      openingMessage: buildOpeningMessage(scenario),
+    });
+  } catch (err) {
+    console.error('Failed to create interview session:', err);
+    return res.status(500).json({ error: INTERVIEW_UNAVAILABLE_MESSAGE });
+  }
+});
+
+app.post('/api/interview/sessions/:sessionId/messages', async (req, res) => {
+  const sessionId = req.params.sessionId;
+  const { content, source, clientTs } = req.body || {};
+
+  if (!isNonEmptyString(content)) {
+    return res.status(400).json({ error: 'Invalid message payload' });
+  }
+
+  if (!activeSessions.has(sessionId)) {
+    return res.status(404).json({ error: 'Interview session not found' });
+  }
+
+  if (!isBackboardConfigured()) {
+    return res.status(500).json({ error: INTERVIEW_UNAVAILABLE_MESSAGE });
+  }
+
+  const session = activeSessions.get(sessionId);
+  const backboard = getBackboardConfig();
+
+  try {
+    const response = await addMessage(session.threadId, {
+      content: content.trim(),
+      llm_provider: backboard.liveProvider,
+      model_name: backboard.liveModel,
+      stream: false,
+      memory: 'off',
+      web_search: 'off',
+      metadata: {
+        route: 'interview_turn',
+        sessionId,
+        scenarioId: session.scenarioId,
+        source: source || 'unknown',
+        clientTs: typeof clientTs === 'number' ? clientTs : null,
+      },
+    });
+
+    const reply = extractContent(response);
+    if (!reply) {
+      throw new Error('Backboard response was empty');
+    }
+
+    return res.json({
+      reply,
+      replyTs: Date.now(),
+    });
+  } catch (err) {
+    console.error('Failed to continue interview session:', err);
+    return res.status(500).json({ error: INTERVIEW_UNAVAILABLE_MESSAGE });
+  }
+});
+
+app.post('/api/reports', async (req, res) => {
+  const { sessionId = null, scenarioId, tracker } = req.body || {};
+
+  if (!isNonEmptyString(scenarioId) || !tracker || typeof tracker !== 'object') {
+    return res.status(400).json({ error: 'Invalid report payload' });
+  }
+
+  if (!isBackboardConfigured()) {
+    return res.status(500).json({ error: REPORT_UNAVAILABLE_MESSAGE });
+  }
+
+  const scenario = await getScenarioById(scenarioId.trim());
+  if (!scenario) {
+    return res.status(404).json({ error: 'Scenario not found' });
+  }
+
+  try {
+    const assistantIds = await ensureAssistants();
+    const backboard = getBackboardConfig();
+    const dossier = buildReportDossier({
+      scenario: buildScenarioForReport(scenario),
+      tracker,
+    });
+
+    const reportAgents = getReportAgentMappings(assistantIds);
+    const settledAnalyses = await Promise.allSettled(
+      reportAgents.map(async ([key, assistantId]) => {
+        const rawText = await runAssistantThread({
+          assistantId,
+          content: buildAnalyzerPrompt(key, dossier),
+          provider: backboard.reportProvider,
+          model: backboard.reportModel,
+          metadata: {
+            route: 'report_agent',
+            sessionId,
+            scenarioId: scenario.id,
+            agent: key,
+          },
+        });
+
+        return [key, sanitizeAnalyzerOutput(key, rawText)];
+      })
     );
 
-    const data = await response.json().catch(() => null);
+    const analyses = {};
+    settledAnalyses.forEach((result, index) => {
+      const [key] = reportAgents[index];
+      if (result.status === 'fulfilled') {
+        const [resolvedKey, analysis] = result.value;
+        analyses[resolvedKey] = analysis;
+        return;
+      }
 
-    if (!response.ok) {
-      console.error('Gemini API error:', response.status, data);
-      return res.status(500).json({ error: 'AI unavailable' });
+      console.error(`Report agent ${key} failed:`, result.reason);
+      analyses[key] = sanitizeAnalyzerOutput(key, result.reason?.message || '');
+    });
+
+    let finalReport;
+
+    try {
+      const synthesis = await runAssistantThread({
+        assistantId: assistantIds.synthesizer,
+        content: buildSynthesizerPrompt({ dossier, analyses }),
+        provider: backboard.reportProvider,
+        model: backboard.reportModel,
+        metadata: {
+          route: 'report_agent',
+          sessionId,
+          scenarioId: scenario.id,
+          agent: 'synthesizer',
+        },
+      });
+
+      finalReport = sanitizeFinalReport(synthesis, dossier, analyses);
+    } catch (err) {
+      console.error('Report synthesis failed:', err);
+      finalReport = buildFallbackReport({ dossier, analyses });
     }
 
-    const text = data?.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === 'string')?.text?.trim();
-    if (!text) {
-      console.error('Gemini response missing text:', data);
-      return res.status(500).json({ error: 'AI unavailable' });
-    }
-
-    return res.json({ reply: text });
+    return res.json({ report: finalReport });
   } catch (err) {
-    console.error('Gemini error:', err);
-    return res.status(500).json({ error: 'AI unavailable' });
+    console.error('Failed to generate report:', err);
+    return res.status(500).json({ error: REPORT_UNAVAILABLE_MESSAGE });
   }
 });
 
