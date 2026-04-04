@@ -1,8 +1,4 @@
-import { useState } from 'react';
-
-export default function Landing({ scenarios, onStart }) {
-  const [selected, setSelected] = useState(scenarios[0]);
-
+export default function Landing({ onStart }) {
   return (
     <div style={{
       minHeight: '100vh', background: '#0a0a0b', color: '#f0f0f0',
@@ -36,21 +32,7 @@ export default function Landing({ scenarios, onStart }) {
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 40, flexWrap: 'wrap', justifyContent: 'center' }}>
-        {scenarios.map(s => (
-          <button key={s.id} onClick={() => setSelected(s)} style={{
-            padding: '10px 20px', borderRadius: 100,
-            border: `1px solid ${selected.id === s.id ? '#ff5c35' : '#222'}`,
-            background: selected.id === s.id ? 'rgba(255,92,53,0.1)' : 'transparent',
-            color: selected.id === s.id ? '#ff5c35' : '#555',
-            cursor: 'pointer', fontFamily: 'sans-serif', fontSize: 14,
-          }}>
-            {s.title}
-          </button>
-        ))}
-      </div>
-
-      <button onClick={() => onStart(selected)} style={{
+      <button onClick={onStart} style={{
         background: '#ff5c35', color: '#fff', border: 'none',
         padding: '16px 52px', borderRadius: 10,
         fontSize: 16, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.05em',
@@ -59,7 +41,7 @@ export default function Landing({ scenarios, onStart }) {
       </button>
 
       <p style={{ marginTop: 20, fontSize: 13, color: '#333' }}>
-        Microphone required · {selected.timeLimit / 60} minutes · {selected.difficulty}
+        Microphone required · Choose your difficulty
       </p>
     </div>
   );

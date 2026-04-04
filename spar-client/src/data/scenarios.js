@@ -1,10 +1,95 @@
 export const scenarios = [
   {
+    id: "null-user-crash",
+    title: "Profile 500 Error",
+    company: "Social App",
+    description: "The /api/profile endpoint crashes with 'Cannot read properties of undefined' whenever an unknown userId is passed. It only happens in production; users are reporting 500 errors.",
+    difficulty: "easy",
+    timeLimit: 25 * 60,
+    files: {
+      "routes/profile.js": `const express = require('express');
+const router = express.Router();
+const db = require('../db');
+
+// GET /api/profile?userId=<id>
+router.get('/', async (req, res) => {
+  const { userId } = req.query;
+
+  const user = await db.users.findOne({ id: userId });
+
+  if (user.deactivated) {
+    return res.status(403).json({ error: 'Account deactivated' });
+  }
+
+  res.json({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    joinedAt: user.createdAt,
+  });
+});
+
+module.exports = router;`,
+
+      "routes/profile.js.fixed.js": `const express = require('express');
+const router = express.Router();
+const db = require('../db');
+
+// GET /api/profile?userId=<id>
+router.get('/', async (req, res) => {
+  const { userId } = req.query;
+
+  const user = await db.users.findOne({ id: userId });
+
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  if (user.deactivated) {
+    return res.status(403).json({ error: 'Account deactivated' });
+  }
+
+  res.json({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    joinedAt: user.createdAt,
+  });
+});
+
+module.exports = router;`,
+
+      "db/index.js": `const { Pool } = require('pg');
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+const users = {
+  // Returns the matching row object, or null if not found.
+  async findOne(query) {
+    const keys = Object.keys(query);
+    const where = keys.map((k, i) => \`\${k} = $\${i + 1}\`).join(' AND ');
+    const result = await pool.query(
+      \`SELECT * FROM users WHERE \${where} LIMIT 1\`,
+      Object.values(query)
+    );
+    return result.rows[0] ?? null;
+  },
+};
+
+module.exports = { users };`,
+    },
+    bugLocation: "routes/profile.js",
+    bugLine: 9,
+    bugExplanation: "db.users.findOne() returns null when userId doesn't match any row. The code immediately reads user.deactivated without checking for null first. In JavaScript, property access on null throws a TypeError, which Express catches and returns as a 500.",
+    fixSummary: "Add a null check immediately after the db lookup: if (!user) return res.status(404).json({ error: 'User not found' }). This guard must come before any property access on the user object.",
+  },
+
+  {
     id: "duplicate-orders",
     title: "Checkout Bug",
     company: "E-commerce Platform",
     description: "Orders are duplicating in production. Customers are being charged twice.",
-    difficulty: "Mid-level",
+    difficulty: "medium",
     timeLimit: 40 * 60,
     files: {
       "routes/orders.js": `const express = require('express');
@@ -141,7 +226,7 @@ module.exports = (req, res, next) => {
     title: "Inventory Oversell",
     company: "Flash Sale Platform",
     description: "Products are selling below zero stock. Customers are getting order confirmations for out-of-stock items.",
-    difficulty: "Senior",
+    difficulty: "hard",
     timeLimit: 40 * 60,
     files: {
       "services/inventory.js": `const { pool } = require('../db/pool');
@@ -266,7 +351,7 @@ module.exports = (req, res, next) => {
     title: "Slow Dashboard",
     company: "SaaS Analytics Co",
     description: "The admin dashboard API times out under load. Response time grows linearly with the number of users.",
-    difficulty: "Mid-level",
+    difficulty: "medium",
     timeLimit: 35 * 60,
     files: {
       "routes/dashboard.js": `const express = require('express');
