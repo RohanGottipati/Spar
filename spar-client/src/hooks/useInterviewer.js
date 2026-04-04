@@ -1,4 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+const CHAT_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
 
 const buildSystemPrompt = (scenario) => `
 You are Alex, a senior engineer at ${scenario.company} conducting a live technical screening.
@@ -25,39 +27,87 @@ const FALLBACKS = [
   "Have you seen something like this before?",
 ];
 
+const createOpeningMessage = (scenario) => ({
+  role: 'assistant',
+  content: `Alright — ${scenario.description}. Take a look at the codebase and walk me through where you want to start.`
+});
+
+const pickFallback = () => FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)];
+
 export function useInterviewer(scenario) {
-  const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      content: `Alright — ${scenario.description}. Take a look at the codebase and walk me through where you want to start.`
-    }
-  ]);
+  const [messages, setMessages] = useState(() => [createOpeningMessage(scenario)]);
   const [isThinking, setIsThinking] = useState(false);
+  const messagesRef = useRef(messages);
+  const pendingRequestsRef = useRef(0);
+  const scenarioVersionRef = useRef(0);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    scenarioVersionRef.current += 1;
+    pendingRequestsRef.current = 0;
+    const openingMessage = [createOpeningMessage(scenario)];
+    messagesRef.current = openingMessage;
+    setMessages(openingMessage);
+    setIsThinking(false);
+  }, [scenario]);
 
   const sendMessage = useCallback(async (userText) => {
-    const newMessages = [...messages, { role: 'user', content: userText }];
-    setMessages(newMessages);
+    const trimmedText = typeof userText === 'string' ? userText.trim() : '';
+    if (!trimmedText) {
+      return;
+    }
+
+    const scenarioVersion = scenarioVersionRef.current;
+    const nextMessages = [...messagesRef.current, { role: 'user', content: trimmedText }];
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    pendingRequestsRef.current += 1;
     setIsThinking(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/chat', {
+      const response = await fetch(`${CHAT_API_BASE_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages, systemPrompt: buildSystemPrompt(scenario) })
+        body: JSON.stringify({ messages: nextMessages, systemPrompt: buildSystemPrompt(scenario) })
       });
 
-      const data = await response.json();
-      const reply = data.reply || FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)];
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        console.error('Gemini request failed:', response.status, data);
+        throw new Error(`Chat request failed with status ${response.status}`);
+      }
+
+      const reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
+      const content = reply || pickFallback();
+
+      if (scenarioVersionRef.current === scenarioVersion) {
+        setMessages((prev) => {
+          const updatedMessages = [...prev, { role: 'assistant', content }];
+          messagesRef.current = updatedMessages;
+          return updatedMessages;
+        });
+      }
 
     } catch (err) {
       console.error('Gemini error:', err);
-      const fallback = FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)];
-      setMessages(prev => [...prev, { role: 'assistant', content: fallback }]);
+      if (scenarioVersionRef.current === scenarioVersion) {
+        const fallback = pickFallback();
+        setMessages((prev) => {
+          const updatedMessages = [...prev, { role: 'assistant', content: fallback }];
+          messagesRef.current = updatedMessages;
+          return updatedMessages;
+        });
+      }
     } finally {
-      setIsThinking(false);
+      if (scenarioVersionRef.current === scenarioVersion) {
+        pendingRequestsRef.current = Math.max(0, pendingRequestsRef.current - 1);
+        setIsThinking(pendingRequestsRef.current > 0);
+      }
     }
-  }, [messages, scenario]);
+  }, [scenario]);
 
   return { messages, isThinking, sendMessage };
 }

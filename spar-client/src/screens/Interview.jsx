@@ -6,6 +6,7 @@ import VoiceBar from '../components/VoiceBar';
 import Timer from '../components/Timer';
 
 export default function Interview({ scenario, onFinish }) {
+  const [sessionStartTime] = useState(() => Date.now());
   const [activeFile, setActiveFile] = useState(Object.keys(scenario.files)[0]);
   const [fileContents, setFileContents] = useState({ ...scenario.files });
   const chatEndRef = useRef(null);
@@ -14,7 +15,7 @@ export default function Interview({ scenario, onFinish }) {
   const behaviorRef = useRef({
     readBeforeEdit: false,
     firstEditTime: null,
-    startTime: Date.now(),
+    startTime: sessionStartTime,
     utteranceCount: 0,
     aiMessagesReceived: 0,
     filesViewed: new Set(),
