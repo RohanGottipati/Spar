@@ -157,7 +157,7 @@ export default function Landing({ scenarios, onStart }) {
       <nav style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 40px', height: 56,
-        position: 'sticky', top: 0, background: 'transparent', zIndex: 10,
+        position: 'fixed', top: 0, left: 0, right: 0, background: 'transparent', zIndex: 10,
       }}>
         <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: '-0.01em' }}>Spar</span>
         <div style={{ display: 'flex', gap: 32 }}>
@@ -177,7 +177,7 @@ export default function Landing({ scenarios, onStart }) {
       </nav>
 
       {/* Hero */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '48px 24px 0', position: 'relative', zIndex: 1 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '104px 24px 0', position: 'relative', zIndex: 1 }}>
         <h1 style={{
           fontSize: 'clamp(2.8rem, 7vw, 5rem)', fontWeight: 500, lineHeight: 1.05,
           letterSpacing: '-0.04em', maxWidth: 900, margin: '0 0 16px',

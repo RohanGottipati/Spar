@@ -55,7 +55,31 @@ export default function Interview({ scenario, onFinish }) {
   const [activeFile, setActiveFile] = useState(Object.keys(scenario.files)[0]);
   const [fileContents, setFileContents] = useState({ ...scenario.files });
   const [usePlainEditor, setUsePlainEditor] = useState(false);
+  const [chatOpen, setChatOpen] = useState(true);
+  const [chatWidth, setChatWidth] = useState(380);
   const chatEndRef = useRef(null);
+  const dragRef = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(380);
+
+  const onDragStart = useCallback((e) => {
+    dragRef.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = chatWidth;
+
+    const onMove = (e) => {
+      if (!dragRef.current) return;
+      const delta = dragStartX.current - e.clientX;
+      setChatWidth(Math.min(600, Math.max(240, dragStartWidth.current + delta)));
+    };
+    const onUp = () => {
+      dragRef.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [chatWidth]);
 
   const behaviorRef = useRef({
     readBeforeEdit: false,
@@ -161,8 +185,8 @@ export default function Interview({ scenario, onFinish }) {
   );
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#0a0a0b', color: '#f0f0f0', fontFamily: 'sans-serif' }}>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid #222' }}>
+    <div style={{ display: 'flex', height: '100vh', background: '#0a0a0b', color: '#f0f0f0', fontFamily: 'sans-serif', userSelect: dragRef.current ? 'none' : 'auto' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
         <div style={{ display: 'flex', background: '#111', borderBottom: '1px solid #222', overflowX: 'auto' }}>
           {visibleFiles.map((filename) => (
             <button
@@ -218,53 +242,99 @@ export default function Interview({ scenario, onFinish }) {
         )}
       </div>
 
-      <div style={{ width: 380, display: 'flex', flexDirection: 'column', background: '#111' }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#ff5c35', letterSpacing: '0.1em' }}>SPAR</div>
-            <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{scenario.title}</div>
-          </div>
-          <Timer seconds={scenario.timeLimit} onExpire={handleFinish} />
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {messages.map((message, index) => (
-            <div
-              key={index}
-              style={{
-                alignSelf: message.role === 'assistant' ? 'flex-start' : 'flex-end',
-                maxWidth: '85%',
-                padding: '10px 14px',
-                borderRadius: message.role === 'assistant' ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
-                background: message.role === 'assistant' ? '#1e1e26' : '#ff5c35',
-                color: '#f0f0f0',
-                fontSize: 14,
-                lineHeight: 1.5,
-              }}
-            >
-              {message.content}
-            </div>
-          ))}
-          {isThinking && (
-            <div style={{ alignSelf: 'flex-start', color: '#555', fontSize: 13, fontStyle: 'italic' }}>
-              thinking...
-            </div>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-
-        <VoiceBar
-          liveTranscript={liveTranscript}
-          isListening={isListening}
-          isThinking={isThinking}
-          connectionState={connectionState}
-          errorMessage={error}
-          onStart={startListening}
-          onStop={stopListening}
-          onFinish={handleFinish}
-          onSubmitText={handleTypedSubmit}
+      {/* Drag handle */}
+      {chatOpen && (
+        <div
+          onMouseDown={onDragStart}
+          style={{
+            width: 4, flexShrink: 0, cursor: 'col-resize',
+            background: 'transparent',
+            borderLeft: '1px solid #222',
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = '#ff5c35'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
         />
-      </div>
+      )}
+
+      {/* Reopen button when chat is closed */}
+      {!chatOpen && (
+        <button
+          onClick={() => setChatOpen(true)}
+          style={{
+            width: 28, flexShrink: 0, background: '#111', border: 'none',
+            borderLeft: '1px solid #222', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#555',
+          }}
+          title="Open chat"
+        >
+          ‹
+        </button>
+      )}
+
+      {/* Chat panel */}
+      {chatOpen && (
+        <div style={{ width: chatWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#111' }}>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#ff5c35', letterSpacing: '0.1em' }}>SPAR</div>
+              <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{scenario.title}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Timer seconds={scenario.timeLimit} onExpire={handleFinish} />
+              <button
+                onClick={() => setChatOpen(false)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: '#444', fontSize: 18, lineHeight: 1, padding: '2px 4px',
+                }}
+                title="Close chat"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {messages.map((message, index) => (
+              <div
+                key={index}
+                style={{
+                  alignSelf: message.role === 'assistant' ? 'flex-start' : 'flex-end',
+                  maxWidth: '85%',
+                  padding: '10px 14px',
+                  borderRadius: message.role === 'assistant' ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
+                  background: message.role === 'assistant' ? '#1e1e26' : '#ff5c35',
+                  color: '#f0f0f0',
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                {message.content}
+              </div>
+            ))}
+            {isThinking && (
+              <div style={{ alignSelf: 'flex-start', color: '#555', fontSize: 13, fontStyle: 'italic' }}>
+                thinking...
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          <VoiceBar
+            liveTranscript={liveTranscript}
+            isListening={isListening}
+            isThinking={isThinking}
+            connectionState={connectionState}
+            errorMessage={error}
+            onStart={startListening}
+            onStop={stopListening}
+            onFinish={handleFinish}
+            onSubmitText={handleTypedSubmit}
+          />
+        </div>
+      )}
     </div>
   );
 }
