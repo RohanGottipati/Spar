@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const CHAT_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
+const DUPLICATE_WINDOW_MS = 1500;
 
 const buildSystemPrompt = (scenario) => `
 You are Alex, a senior engineer at ${scenario.company} conducting a live technical screening.
@@ -9,11 +10,12 @@ They have access to the codebase and are thinking out loud as they work.
 
 Rules:
 - Ask ONE short follow-up question per response. Max 2 sentences.
+- Keep each response under 25 words unless you are asking about edge cases.
 - Never explain the bug or give the answer away.
 - Push on their reasoning, not just their actions. "Why there?" not "What did you find?"
 - If they're heading the right direction, go deeper.
 - If they're stuck, give a small nudge — not the answer.
-- Sound human. Use contractions. No preamble. No "Great question!"
+- Sound human. Use contractions. No praise, no preamble, no bullet lists.
 - When they propose a fix, ask about edge cases.
 `;
 
@@ -33,6 +35,14 @@ const createOpeningMessage = (scenario) => ({
 });
 
 const pickFallback = () => FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)];
+const extractReply = (data) => {
+  if (typeof data?.reply === 'string') {
+    return data.reply.trim();
+  }
+
+  const candidateReply = data?.candidates?.[0]?.content?.parts?.find((part) => typeof part?.text === 'string')?.text;
+  return typeof candidateReply === 'string' ? candidateReply.trim() : '';
+};
 
 export function useInterviewer(scenario) {
   const [messages, setMessages] = useState(() => [createOpeningMessage(scenario)]);
@@ -40,6 +50,7 @@ export function useInterviewer(scenario) {
   const messagesRef = useRef(messages);
   const pendingRequestsRef = useRef(0);
   const scenarioVersionRef = useRef(0);
+  const lastSendRef = useRef({ text: '', timestamp: 0 });
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -52,6 +63,7 @@ export function useInterviewer(scenario) {
     messagesRef.current = openingMessage;
     setMessages(openingMessage);
     setIsThinking(false);
+    lastSendRef.current = { text: '', timestamp: 0 };
   }, [scenario]);
 
   const sendMessage = useCallback(async (userText) => {
@@ -60,6 +72,15 @@ export function useInterviewer(scenario) {
       return;
     }
 
+    const now = Date.now();
+    if (
+      lastSendRef.current.text === trimmedText
+      && now - lastSendRef.current.timestamp < DUPLICATE_WINDOW_MS
+    ) {
+      return;
+    }
+
+    lastSendRef.current = { text: trimmedText, timestamp: now };
     const scenarioVersion = scenarioVersionRef.current;
     const nextMessages = [...messagesRef.current, { role: 'user', content: trimmedText }];
     messagesRef.current = nextMessages;
@@ -80,7 +101,7 @@ export function useInterviewer(scenario) {
         throw new Error(`Chat request failed with status ${response.status}`);
       }
 
-      const reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
+      const reply = extractReply(data);
       const content = reply || pickFallback();
 
       if (scenarioVersionRef.current === scenarioVersion) {

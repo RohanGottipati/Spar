@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spar Voice Harness</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #0a0a0b;
+        color: #f0f0f0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+
+      main {
+        width: min(720px, 100%);
+        background: #111;
+        border: 1px solid #222;
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(2rem, 5vw, 3rem);
+      }
+
+      p {
+        color: #888;
+        line-height: 1.6;
+      }
+
+      .status {
+        margin: 16px 0;
+        padding: 12px 14px;
+        background: #0f0f10;
+        border: 1px solid #222;
+        border-radius: 10px;
+        color: #f5a623;
+      }
+
+      .row {
+        display: flex;
+        gap: 12px;
+        margin: 20px 0;
+      }
+
+      button {
+        border: none;
+        border-radius: 10px;
+        padding: 12px 18px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      #start {
+        background: #ff5c35;
+        color: #fff;
+      }
+
+      #stop {
+        background: #1e1e26;
+        color: #fff;
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .panel {
+        margin-top: 16px;
+        padding: 16px;
+        border-radius: 14px;
+        background: #0f0f10;
+        border: 1px solid #222;
+      }
+
+      .label {
+        margin-bottom: 8px;
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #666;
+      }
+
+      #live {
+        min-height: 24px;
+        font-style: italic;
+        color: #bbb;
+      }
+
+      #final {
+        display: grid;
+        gap: 10px;
+      }
+
+      .final-line {
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: #17171a;
+        color: #e4e4e4;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Spar Voice Harness</h1>
+      <p>
+        Open this page in Chrome at <code>http://localhost:3001/test-voice.html</code>, allow microphone access,
+        and confirm that interim and final transcripts appear before testing the React app.
+      </p>
+
+      <div id="status" class="status">Idle. Click Start and speak normally.</div>
+
+      <div class="row">
+        <button id="start" type="button">Start</button>
+        <button id="stop" type="button" disabled>Stop</button>
+      </div>
+
+      <section class="panel">
+        <div class="label">Live Transcript</div>
+        <div id="live"></div>
+      </section>
+
+      <section class="panel">
+        <div class="label">Final Transcript</div>
+        <div id="final"></div>
+      </section>
+    </main>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const liveEl = document.getElementById('live');
+      const finalEl = document.getElementById('final');
+      const startButton = document.getElementById('start');
+      const stopButton = document.getElementById('stop');
+
+      let mediaStream = null;
+      let mediaRecorder = null;
+      let socket = null;
+
+      function setStatus(message, color) {
+        statusEl.textContent = message;
+        statusEl.style.color = color;
+      }
+
+      function cleanup() {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          try {
+            mediaRecorder.stop();
+          } catch (err) {
+            console.error('Recorder stop failed:', err);
+          }
+        }
+
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+          try {
+            socket.close();
+          } catch (err) {
+            console.error('Socket close failed:', err);
+          }
+        }
+
+        if (mediaStream) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+        }
+
+        mediaStream = null;
+        mediaRecorder = null;
+        socket = null;
+        startButton.disabled = false;
+        stopButton.disabled = true;
+        liveEl.textContent = '';
+      }
+
+      function getRecorderOptions() {
+        if (!window.MediaRecorder) {
+          return undefined;
+        }
+
+        const preferredMimeTypes = ['audio/webm;codecs=opus', 'audio/webm'];
+        const supportedMimeType = preferredMimeTypes.find((mimeType) => (
+          typeof MediaRecorder.isTypeSupported === 'function'
+            ? MediaRecorder.isTypeSupported(mimeType)
+            : false
+        ));
+
+        return supportedMimeType ? { mimeType: supportedMimeType } : undefined;
+      }
+
+      startButton.addEventListener('click', async () => {
+        if (!navigator.mediaDevices?.getUserMedia || typeof WebSocket === 'undefined' || typeof MediaRecorder === 'undefined') {
+          setStatus('This browser cannot capture audio here.', '#ff8c6b');
+          return;
+        }
+
+        try {
+          setStatus('Requesting microphone access...', '#f5a623');
+          mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          socket = new WebSocket(`ws://${window.location.host}/deepgram`);
+
+          socket.onopen = () => {
+            try {
+              mediaRecorder = new MediaRecorder(mediaStream, getRecorderOptions());
+              mediaRecorder.ondataavailable = (event) => {
+                if (socket.readyState === WebSocket.OPEN && event.data.size > 0) {
+                  socket.send(event.data);
+                }
+              };
+
+              mediaRecorder.start(250);
+              startButton.disabled = true;
+              stopButton.disabled = false;
+              setStatus('Recording. Speak naturally.', '#3ddc84');
+            } catch (err) {
+              console.error('Recorder setup failed:', err);
+              setStatus('Audio capture could not start.', '#ff8c6b');
+              cleanup();
+            }
+          };
+
+          socket.onmessage = (event) => {
+            let payload;
+            try {
+              payload = JSON.parse(event.data);
+            } catch (err) {
+              console.error('Failed to parse transcript payload:', err);
+              return;
+            }
+
+            if (payload.type === 'error') {
+              setStatus(payload.message || 'Voice is unavailable.', '#ff8c6b');
+              cleanup();
+              return;
+            }
+
+            const transcript = payload.channel?.alternatives?.[0]?.transcript;
+            if (!transcript) {
+              return;
+            }
+
+            liveEl.textContent = transcript;
+
+            if (payload.is_final) {
+              const line = document.createElement('div');
+              line.className = 'final-line';
+              line.textContent = transcript;
+              finalEl.prepend(line);
+              liveEl.textContent = '';
+            }
+          };
+
+          socket.onerror = (err) => {
+            console.error('Socket error:', err);
+            setStatus('Voice connection failed.', '#ff8c6b');
+            cleanup();
+          };
+
+          socket.onclose = () => {
+            if (stopButton.disabled) {
+              return;
+            }
+
+            setStatus('Voice connection closed.', '#ff8c6b');
+            cleanup();
+          };
+        } catch (err) {
+          console.error('Microphone error:', err);
+          setStatus('Microphone access failed. Check Chrome permissions.', '#ff8c6b');
+          cleanup();
+        }
+      });
+
+      stopButton.addEventListener('click', () => {
+        setStatus('Stopped.', '#888');
+        cleanup();
+      });
+    </script>
+  </body>
+</html>
