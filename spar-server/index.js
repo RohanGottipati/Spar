@@ -47,15 +47,15 @@ wss.on('connection', (clientSocket) => {
     { headers: { Authorization: `Token ${process.env.DEEPGRAM_API_KEY}` } }
   );
 
-  clientSocket.on('message', (data) => {
+  clientSocket.on('message', (data, isBinary) => {
     if (deepgramSocket.readyState === WebSocket.OPEN) {
-      deepgramSocket.send(data);
+      deepgramSocket.send(data, { binary: isBinary });
     }
   });
 
-  deepgramSocket.on('message', (data) => {
+  deepgramSocket.on('message', (data, isBinary) => {
     if (clientSocket.readyState === WebSocket.OPEN) {
-      clientSocket.send(data);
+      clientSocket.send(data, { binary: isBinary });
     }
   });
 
