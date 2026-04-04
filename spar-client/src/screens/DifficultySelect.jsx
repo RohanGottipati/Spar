@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import bgImage from '../assets/bg.jpg';
 
 const DIFFICULTIES = [
   {
@@ -31,81 +32,136 @@ export default function DifficultySelect({ scenarios, onSelect, onBack }) {
 
   return (
     <div style={{
-      minHeight: '100vh', background: '#0a0a0b', color: '#f0f0f0',
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', fontFamily: 'sans-serif', padding: 40,
+      minHeight: '100vh', color: '#f0f0f0', fontFamily: 'Inter, sans-serif',
+      backgroundImage: `url(${bgImage})`,
+      backgroundSize: 'cover', backgroundPosition: 'center top',
+      position: 'relative',
     }}>
-      <div style={{ fontSize: 11, color: '#ff5c35', fontWeight: 700, letterSpacing: '0.25em', marginBottom: 40 }}>
-        ▲ SPAR
-      </div>
+      {/* Dark overlay */}
+      <div style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(5,5,8,0.80)',
+        zIndex: 0, pointerEvents: 'none',
+      }} />
 
-      <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 8, textAlign: 'center', letterSpacing: '-0.02em' }}>
-        Pick your difficulty
-      </h2>
-      <p style={{ color: '#555', fontSize: 15, marginBottom: 48, textAlign: 'center' }}>
-        This sets the complexity of the bug you'll be asked to find and fix.
-      </p>
+      {/* Nav */}
+      <nav style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 40px', height: 56,
+        position: 'fixed', top: 0, left: 0, right: 0,
+        background: 'transparent', zIndex: 10,
+      }}>
+        <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: '-0.01em' }}>Spar</span>
+        {onBack && (
+          <button
+            onClick={onBack}
+            style={{
+              background: 'transparent', color: '#888', border: '1px solid #333',
+              padding: '6px 16px', borderRadius: 7, cursor: 'pointer',
+              fontFamily: 'Inter, sans-serif', fontSize: 13,
+              transition: 'color 0.15s, border-color 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#f0f0f0'; e.currentTarget.style.borderColor = '#555'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#888'; e.currentTarget.style.borderColor = '#333'; }}
+          >
+            ← Back
+          </button>
+        )}
+      </nav>
 
-      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 860, width: '100%' }}>
-        {DIFFICULTIES.map(({ value, label, tagline, description, accentColor }) => {
-          const count = countFor(value);
-          const isHovered = hovered === value;
-          return (
-            <button
-              key={value}
-              onClick={() => count > 0 && onSelect(value)}
-              onMouseEnter={() => count > 0 && setHovered(value)}
-              onMouseLeave={() => setHovered(null)}
-              style={{
-                flex: '1 1 240px',
-                maxWidth: 280,
-                background: isHovered && count > 0 ? '#111' : 'transparent',
-                border: `1px solid ${isHovered && count > 0 ? accentColor : '#222'}`,
-                borderRadius: 12,
-                padding: '28px 24px',
-                cursor: count > 0 ? 'pointer' : 'not-allowed',
-                opacity: count > 0 ? 1 : 0.4,
-                textAlign: 'left',
-                color: '#f0f0f0',
-                fontFamily: 'sans-serif',
-                transition: 'border-color 0.15s, background 0.15s',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <span style={{ fontSize: 18, fontWeight: 800, color: isHovered ? accentColor : '#f0f0f0' }}>
-                  {label}
-                </span>
-                <span style={{
-                  fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
-                  color: accentColor, background: `${accentColor}1a`,
-                  padding: '3px 8px', borderRadius: 100,
+      {/* Content */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', minHeight: '100vh',
+        padding: '80px 32px 48px', position: 'relative', zIndex: 1,
+      }}>
+        <h1 style={{
+          fontSize: 'clamp(2.4rem, 5vw, 3.8rem)', fontWeight: 500, lineHeight: 1.05,
+          letterSpacing: '-0.04em', margin: '0 0 16px', textAlign: 'center',
+        }}>
+          Pick your difficulty
+        </h1>
+        <p style={{ color: '#888', fontSize: 22, marginBottom: 52, textAlign: 'center', maxWidth: 560, lineHeight: 1.6 }}>
+          Choose how hard you want to be challenged.
+        </p>
+
+        {/* Cards row */}
+        <div style={{
+          display: 'flex', gap: 16, width: '100%', maxWidth: 1080,
+        }}>
+          {DIFFICULTIES.map(({ value, label, tagline, description, accentColor }, i) => {
+            const count = countFor(value);
+            const isHovered = hovered === value;
+            const available = count > 0;
+            return (
+              <button
+                key={value}
+                onClick={() => available && onSelect(value)}
+                onMouseEnter={() => available && setHovered(value)}
+                onMouseLeave={() => setHovered(null)}
+                style={{
+                  flex: 1,
+                  background: isHovered && available
+                    ? `${accentColor}14`
+                    : 'rgba(0,0,0,0.55)',
+                  backdropFilter: 'blur(40px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                  border: `1px solid ${isHovered && available ? accentColor : 'rgba(255,255,255,0.18)'}`,
+                  boxShadow: isHovered && available
+                    ? `0 8px 40px ${accentColor}22, inset 0 1px 0 rgba(255,255,255,0.12)`
+                    : '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12)',
+                  borderRadius: 14,
+                  padding: '40px 36px 36px',
+                  cursor: available ? 'pointer' : 'not-allowed',
+                  opacity: available ? 1 : 0.35,
+                  textAlign: 'left',
+                  color: '#f0f0f0',
+                  fontFamily: 'Inter, sans-serif',
+                  transition: 'background 0.2s, border-color 0.2s, box-shadow 0.2s',
+                  display: 'flex', flexDirection: 'column',
+                }}
+              >
+                {/* Title + badge */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+                  <span style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1 }}>
+                    {label}
+                  </span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+                    color: accentColor, background: `${accentColor}20`,
+                    padding: '4px 9px', borderRadius: 100, marginTop: 4,
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {count} {count === 1 ? 'SCENARIO' : 'SCENARIOS'}
+                  </span>
+                </div>
+
+                {/* Tagline */}
+                <div style={{
+                  fontSize: 11, fontWeight: 700, color: accentColor,
+                  letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 14,
                 }}>
-                  {count} {count === 1 ? 'scenario' : 'scenarios'}
-                </span>
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: accentColor, marginBottom: 8 }}>
-                {tagline}
-              </div>
-              <p style={{ fontSize: 14, color: '#666', lineHeight: 1.6, margin: 0 }}>
-                {description}
-              </p>
-            </button>
-          );
-        })}
-      </div>
+                  {tagline}
+                </div>
 
-      {onBack && (
-        <button
-          onClick={onBack}
-          style={{
-            marginTop: 40, background: 'transparent', color: '#555',
-            border: '1px solid #333', padding: '10px 24px', borderRadius: 8,
-            cursor: 'pointer', fontFamily: 'sans-serif', fontSize: 14,
-          }}
-        >
-          ← Back
-        </button>
-      )}
+                {/* Description */}
+                <p style={{ fontSize: 15, color: '#bbb', lineHeight: 1.7, margin: '0 0 36px', flex: 1 }}>
+                  {description}
+                </p>
+
+                {/* Select link */}
+                <div style={{
+                  fontSize: 14, fontWeight: 600, color: available ? accentColor : '#555',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  opacity: isHovered ? 1 : 0.7, transition: 'opacity 0.15s',
+                }}>
+                  Select {label} <span style={{ fontSize: 16 }}>→</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

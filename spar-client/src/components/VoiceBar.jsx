@@ -62,7 +62,7 @@ export default function VoiceBar({
   }
 
   return (
-    <div style={{ padding: 16, borderTop: '1px solid #222', background: '#111' }}>
+    <div style={{ padding: 16, borderTop: '1px solid #1e1e1e', background: '#0f0f14', fontFamily: 'Inter, sans-serif' }}>
       {liveTranscript && (
         <div style={{
           marginBottom: 12,

@@ -157,18 +157,10 @@ export default function Landing({ scenarios, onStart }) {
       <nav style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 40px', height: 56,
-        position: 'sticky', top: 0, background: 'transparent', zIndex: 10,
+        position: 'fixed', top: 0, left: 0, right: 0, background: 'transparent', zIndex: 10,
       }}>
         <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: '-0.01em' }}>Spar</span>
-        <div style={{ display: 'flex', gap: 32 }}>
-          {['Examples', 'How it works', 'Docs'].map(l => (
-            <a key={l} href="#" style={{ color: '#ccc', fontSize: 14, textDecoration: 'none' }}
-              onMouseEnter={e => e.target.style.color = '#fff'}
-              onMouseLeave={e => e.target.style.color = '#ccc'}>
-              {l}
-            </a>
-          ))}
-        </div>
+        <div />
         <a href="#" style={{ color: '#ccc', fontSize: 14, textDecoration: 'none' }}
           onMouseEnter={e => e.target.style.color = '#f0f0f0'}
           onMouseLeave={e => e.target.style.color = '#ccc'}>
@@ -177,9 +169,9 @@ export default function Landing({ scenarios, onStart }) {
       </nav>
 
       {/* Hero */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '48px 24px 0', position: 'relative', zIndex: 1 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '104px 24px 0', position: 'relative', zIndex: 1 }}>
         <h1 style={{
-          fontSize: 'clamp(2.8rem, 7vw, 5rem)', fontWeight: 500, lineHeight: 1.05,
+          fontSize: 'clamp(2.4rem, 5.5vw, 4rem)', fontWeight: 500, lineHeight: 1.05,
           letterSpacing: '-0.04em', maxWidth: 900, margin: '0 0 16px',
         }}>
           Practice debugging like a real interview
@@ -212,7 +204,7 @@ export default function Landing({ scenarios, onStart }) {
 
         {/* Code demo panel */}
         <div style={{
-          width: '100%', maxWidth: 1000, borderRadius: 12,
+          width: '100%', maxWidth: 1200, borderRadius: 12,
           border: '1px solid #222', background: '#111', overflow: 'hidden',
           marginBottom: 40, boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
           position: 'relative',
@@ -231,7 +223,7 @@ export default function Landing({ scenarios, onStart }) {
           </div>
 
           {/* Monaco editor */}
-          <div style={{ height: 420 }}>
+          <div style={{ height: 560 }}>
             <Editor
               height="100%"
               language="javascript"
