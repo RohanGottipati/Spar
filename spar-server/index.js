@@ -37,6 +37,22 @@ wss.on('connection', (clientSocket) => {
 // ── GEMINI PROXY (HTTP) ─────────────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
   const { messages, systemPrompt } = req.body;
+  const hasValidPrompt = typeof systemPrompt === 'string' && systemPrompt.trim().length > 0;
+  const hasValidMessages = Array.isArray(messages) && messages.every((message) => (
+    message
+    && (message.role === 'user' || message.role === 'assistant')
+    && typeof message.content === 'string'
+    && message.content.trim().length > 0
+  ));
+
+  if (!hasValidPrompt || !hasValidMessages) {
+    return res.status(400).json({ error: 'Invalid chat payload' });
+  }
+
+  if (!process.env.GEMINI_API_KEY) {
+    console.error('Gemini API key is not configured');
+    return res.status(500).json({ error: 'AI unavailable' });
+  }
 
   try {
     const response = await fetch(
@@ -55,13 +71,24 @@ app.post('/api/chat', async (req, res) => {
       }
     );
 
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    res.json({ reply: text || null });
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      console.error('Gemini API error:', response.status, data);
+      return res.status(500).json({ error: 'AI unavailable' });
+    }
+
+    const text = data?.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === 'string')?.text?.trim();
+    if (!text) {
+      console.error('Gemini response missing text:', data);
+      return res.status(500).json({ error: 'AI unavailable' });
+    }
+
+    return res.json({ reply: text });
 
   } catch (err) {
     console.error('Gemini error:', err);
-    res.status(500).json({ error: 'AI unavailable' });
+    return res.status(500).json({ error: 'AI unavailable' });
   }
 });
 
