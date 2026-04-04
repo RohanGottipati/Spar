@@ -2,6 +2,7 @@ import { Component, useCallback, useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { useDeepgram } from '../hooks/useDeepgram';
 import { useInterviewer } from '../hooks/useInterviewer';
+import { useSessionTracker } from '../hooks/useSessionTracker';
 import VoiceBar from '../components/VoiceBar';
 import Timer from '../components/Timer';
 
@@ -50,17 +51,35 @@ function MonacoLoadingFallback({ onTimeout }) {
   );
 }
 
-export default function Interview({ scenario, onFinish }) {
-  const [sessionStartTime] = useState(() => Date.now());
-  const [activeFile, setActiveFile] = useState(Object.keys(scenario.files)[0]);
-  const [fileContents, setFileContents] = useState({ ...scenario.files });
+function getVisibleFilesMap(scenario) {
+  return Object.fromEntries(
+    Object.entries(scenario.files || {}).filter(([filename]) => !filename.includes('.fixed.'))
+  );
+}
+
+function getLanguageForFile(filename) {
+  if (filename.endsWith('.json')) return 'json';
+  if (filename.endsWith('.css')) return 'css';
+  return 'javascript';
+}
+
+export default function Interview({ scenario, onFinish, onBack }) {
+  const visibleFilesMap = getVisibleFilesMap(scenario);
+  const visibleFiles = Object.keys(visibleFilesMap);
+  const initialFile = visibleFiles[0] || '';
+  const [activeFile, setActiveFile] = useState(initialFile);
+  const [fileContents, setFileContents] = useState(() => ({ ...visibleFilesMap }));
   const [usePlainEditor, setUsePlainEditor] = useState(false);
+  const [isFinishing, setIsFinishing] = useState(false);
   const [chatOpen, setChatOpen] = useState(true);
   const [chatWidth, setChatWidth] = useState(380);
   const chatEndRef = useRef(null);
+  const activeFileRef = useRef(initialFile);
+  const editorListenerRef = useRef(null);
   const dragRef = useRef(false);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(380);
+  const tracker = useSessionTracker({ scenarioId: scenario.id, initialFile });
 
   const onDragStart = useCallback((e) => {
     dragRef.current = true;
@@ -81,26 +100,48 @@ export default function Interview({ scenario, onFinish }) {
     window.addEventListener('mouseup', onUp);
   }, [chatWidth]);
 
-  const behaviorRef = useRef({
-    readBeforeEdit: false,
-    firstEditTime: null,
-    startTime: sessionStartTime,
-    utteranceCount: 0,
-    aiMessagesReceived: 0,
-    filesViewed: new Set(),
+  const handleTrackedMessage = useCallback((message) => {
+    tracker.recordChatMessage(message);
+  }, [tracker]);
+
+  const { sessionId, messages, isThinking, isReady, error: interviewerError, sendMessage, finishSession } = useInterviewer(scenario, {
+    onMessage: handleTrackedMessage,
   });
 
-  const { messages, isThinking, sendMessage } = useInterviewer(scenario);
+  useEffect(() => {
+    if (sessionId) tracker.setSessionId(sessionId);
+  }, [sessionId, tracker]);
 
-  const submitCandidateMessage = useCallback((text) => {
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isThinking]);
+
+  useEffect(() => () => {
+    editorListenerRef.current?.dispose?.();
+  }, []);
+
+  const updateFileContent = useCallback((filename, nextValue) => {
+    const normalizedValue = nextValue ?? '';
+    setFileContents((prev) => (
+      prev[filename] === normalizedValue ? prev : { ...prev, [filename]: normalizedValue }
+    ));
+  }, []);
+
+  const recordPlainEditorChange = useCallback((filename, value) => {
+    tracker.recordEditorChange({
+      file: filename,
+      ts: Date.now(),
+      versionId: null,
+      changes: [{ rangeOffset: 0, rangeLength: 0, text: value ?? '' }],
+    });
+  }, [tracker]);
+
+  const submitCandidateMessage = useCallback((text, source) => {
     const trimmedText = typeof text === 'string' ? text.trim() : '';
-    if (!trimmedText) {
-      return;
-    }
-
-    behaviorRef.current.utteranceCount++;
-    sendMessage(trimmedText);
-  }, [sendMessage]);
+    if (!trimmedText || isFinishing) return;
+    tracker.recordUtterance({ text: trimmedText, source, ts: Date.now() });
+    sendMessage(trimmedText, { source });
+  }, [isFinishing, sendMessage, tracker]);
 
   const {
     isListening,
@@ -110,96 +151,96 @@ export default function Interview({ scenario, onFinish }) {
     startListening,
     stopListening,
   } = useDeepgram({
-    onFinalTranscript: submitCandidateMessage,
+    onFinalTranscript: (text) => submitCandidateMessage(text, 'voice'),
   });
 
-  const handleFileSelect = (filename) => {
+  const handleFileSelect = useCallback((filename) => {
     setActiveFile(filename);
-    behaviorRef.current.filesViewed.add(filename);
-    if (!behaviorRef.current.firstEditTime) {
-      behaviorRef.current.readBeforeEdit = true;
-    }
-  };
+    activeFileRef.current = filename;
+    tracker.recordFileOpen(filename);
+  }, [tracker]);
 
-  const handleEditorChange = (value) => {
-    if (!behaviorRef.current.firstEditTime) {
-      behaviorRef.current.firstEditTime = Date.now();
-    }
+  const handleEditorChange = useCallback((value) => {
+    const filename = activeFileRef.current;
+    updateFileContent(filename, value);
+    if (usePlainEditor) recordPlainEditorChange(filename, value);
+  }, [recordPlainEditorChange, updateFileContent, usePlainEditor]);
 
-    setFileContents((prev) => ({ ...prev, [activeFile]: value ?? '' }));
-  };
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    behaviorRef.current.aiMessagesReceived = messages.filter((message) => message.role === 'assistant').length;
-  }, [messages]);
+  const handleMonacoMount = useCallback((editor) => {
+    setUsePlainEditor(false);
+    editorListenerRef.current?.dispose?.();
+    editorListenerRef.current = editor.onDidChangeModelContent((event) => {
+      const filename = activeFileRef.current;
+      const nextValue = editor.getValue();
+      tracker.recordEditorChange({
+        file: filename,
+        ts: Date.now(),
+        versionId: event.versionId,
+        isUndoing: event.isUndoing,
+        isRedoing: event.isRedoing,
+        changes: event.changes.map((change) => ({
+          rangeOffset: change.rangeOffset,
+          rangeLength: change.rangeLength,
+          text: change.text,
+        })),
+      });
+      updateFileContent(filename, nextValue);
+    });
+  }, [setUsePlainEditor, tracker, updateFileContent]);
 
   useEffect(() => () => {
     stopListening();
-  }, [stopListening]);
+    finishSession();
+  }, [finishSession, stopListening]);
 
   const handleTypedSubmit = useCallback((text) => {
-    if (isListening) {
-      stopListening();
-    }
-
-    submitCandidateMessage(text);
+    if (isListening) stopListening();
+    submitCandidateMessage(text, 'typed');
   }, [isListening, stopListening, submitCandidateMessage]);
 
   const handleFinish = useCallback(() => {
+    if (isFinishing) return;
+    setIsFinishing(true);
     stopListening();
-    const behavior = behaviorRef.current;
-    onFinish({
-      duration: Math.floor((Date.now() - behavior.startTime) / 1000),
-      readBeforeEdit: behavior.readBeforeEdit,
-      filesViewed: behavior.filesViewed.size,
-      utteranceCount: behavior.utteranceCount,
-      aiMessagesReceived: behavior.aiMessagesReceived,
-      timeToFirstEdit: behavior.firstEditTime
-        ? Math.floor((behavior.firstEditTime - behavior.startTime) / 1000)
-        : null,
-      conversationHistory: messages,
+    finishSession();
+    const trackerPayload = tracker.finalize({
+      finalFiles: fileContents,
+      activeFileAtFinish: activeFileRef.current,
+      finishedAt: Date.now(),
     });
-  }, [messages, onFinish, stopListening]);
+    onFinish({ sessionId, scenarioId: scenario.id, tracker: trackerPayload });
+  }, [fileContents, finishSession, isFinishing, onFinish, scenario.id, sessionId, stopListening, tracker]);
 
-  const visibleFiles = Object.keys(scenario.files).filter((filename) => !filename.includes('.fixed.'));
   const simpleEditor = (
     <textarea
-      value={fileContents[activeFile]}
+      value={fileContents[activeFile] ?? ''}
       onChange={(event) => handleEditorChange(event.target.value)}
       spellCheck={false}
       style={{
-        width: '100%',
-        height: '100%',
-        padding: 16,
-        border: 'none',
-        background: '#111',
-        color: '#f0f0f0',
-        fontFamily: 'monospace',
-        fontSize: 14,
-        lineHeight: 1.5,
-        resize: 'none',
-        outline: 'none',
+        width: '100%', height: '100%', padding: 16, border: 'none',
+        background: '#111', color: '#f0f0f0', fontFamily: 'monospace',
+        fontSize: 14, lineHeight: 1.5, resize: 'none', outline: 'none',
       }}
     />
   );
 
+  const interactionDisabled = isFinishing || !isReady || Boolean(interviewerError);
+
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#0a0a0b', color: '#f0f0f0', fontFamily: 'sans-serif', userSelect: dragRef.current ? 'none' : 'auto' }}>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
+
+      {/* Editor panel */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div style={{ display: 'flex', background: '#111', borderBottom: '1px solid #222', overflowX: 'auto' }}>
           {visibleFiles.map((filename) => (
             <button
               key={filename}
               onClick={() => handleFileSelect(filename)}
               style={{
-                padding: '10px 20px',
-                border: 'none',
-                cursor: 'pointer',
+                padding: '10px 20px', border: 'none', cursor: 'pointer',
                 background: activeFile === filename ? '#1e1e1e' : 'transparent',
                 color: activeFile === filename ? '#fff' : '#666',
-                fontFamily: 'monospace',
-                fontSize: 13,
+                fontFamily: 'monospace', fontSize: 13,
                 borderBottom: activeFile === filename ? '2px solid #ff5c35' : '2px solid transparent',
                 whiteSpace: 'nowrap',
               }}
@@ -216,19 +257,15 @@ export default function Interview({ scenario, onFinish }) {
             <MonacoErrorBoundary onError={() => setUsePlainEditor(true)} fallback={simpleEditor}>
               <Editor
                 height="100%"
-                language="javascript"
+                path={activeFile}
+                language={getLanguageForFile(activeFile)}
                 theme="vs-dark"
-                value={fileContents[activeFile]}
-                onChange={handleEditorChange}
-                onMount={() => setUsePlainEditor(false)}
+                value={fileContents[activeFile] ?? ''}
+                onMount={handleMonacoMount}
                 loading={<MonacoLoadingFallback onTimeout={() => setUsePlainEditor(true)} />}
                 options={{
-                  fontSize: 14,
-                  minimap: { enabled: false },
-                  lineNumbers: 'on',
-                  wordWrap: 'on',
-                  scrollBeyondLastLine: false,
-                  padding: { top: 16 },
+                  fontSize: 14, minimap: { enabled: false }, lineNumbers: 'on',
+                  wordWrap: 'on', scrollBeyondLastLine: false, padding: { top: 16 },
                 }}
               />
             </MonacoErrorBoundary>
@@ -248,8 +285,7 @@ export default function Interview({ scenario, onFinish }) {
           onMouseDown={onDragStart}
           style={{
             width: 4, flexShrink: 0, cursor: 'col-resize',
-            background: 'transparent',
-            borderLeft: '1px solid #222',
+            background: 'transparent', borderLeft: '1px solid #222',
             transition: 'background 0.15s',
           }}
           onMouseEnter={e => e.currentTarget.style.background = '#ff5c35'}
@@ -265,7 +301,7 @@ export default function Interview({ scenario, onFinish }) {
             width: 28, flexShrink: 0, background: '#111', border: 'none',
             borderLeft: '1px solid #222', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#555',
+            color: '#555', fontSize: 18,
           }}
           title="Open chat"
         >
@@ -277,9 +313,24 @@ export default function Interview({ scenario, onFinish }) {
       {chatOpen && (
         <div style={{ width: chatWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#111' }}>
           <div style={{ padding: '16px 20px', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#ff5c35', letterSpacing: '0.1em' }}>SPAR</div>
-              <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{scenario.title}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {onBack && (
+                <button
+                  onClick={() => { stopListening(); onBack(); }}
+                  title="Exit interview"
+                  style={{
+                    background: 'transparent', border: '1px solid #333', color: '#555',
+                    padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                    fontFamily: 'sans-serif', fontSize: 12,
+                  }}
+                >
+                  ← Back
+                </button>
+              )}
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#ff5c35', letterSpacing: '0.1em' }}>SPAR</div>
+                <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{scenario.title}</div>
+              </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <Timer seconds={scenario.timeLimit} onExpire={handleFinish} />
@@ -296,24 +347,34 @@ export default function Interview({ scenario, onFinish }) {
             </div>
           </div>
 
+          {interviewerError && (
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid #222', background: '#161014', color: '#ff8c6b', fontSize: 13 }}>
+              {interviewerError}
+            </div>
+          )}
+
           <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {messages.map((message, index) => (
+            {!isReady && !interviewerError && messages.length === 0 && (
+              <div style={{ alignSelf: 'flex-start', color: '#555', fontSize: 13, fontStyle: 'italic' }}>
+                preparing interviewer...
+              </div>
+            )}
+
+            {messages.map((message) => (
               <div
-                key={index}
+                key={message.id}
                 style={{
                   alignSelf: message.role === 'assistant' ? 'flex-start' : 'flex-end',
-                  maxWidth: '85%',
-                  padding: '10px 14px',
+                  maxWidth: '85%', padding: '10px 14px',
                   borderRadius: message.role === 'assistant' ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
                   background: message.role === 'assistant' ? '#1e1e26' : '#ff5c35',
-                  color: '#f0f0f0',
-                  fontSize: 14,
-                  lineHeight: 1.5,
+                  color: '#f0f0f0', fontSize: 14, lineHeight: 1.5,
                 }}
               >
                 {message.content}
               </div>
             ))}
+
             {isThinking && (
               <div style={{ alignSelf: 'flex-start', color: '#555', fontSize: 13, fontStyle: 'italic' }}>
                 thinking...
@@ -328,6 +389,8 @@ export default function Interview({ scenario, onFinish }) {
             isThinking={isThinking}
             connectionState={connectionState}
             errorMessage={error}
+            disabled={interactionDisabled}
+            disableFinish={isFinishing}
             onStart={startListening}
             onStop={stopListening}
             onFinish={handleFinish}
