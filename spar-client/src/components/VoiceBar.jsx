@@ -6,18 +6,20 @@ export default function VoiceBar({
   isThinking = false,
   connectionState = 'idle',
   errorMessage = '',
+  disabled = false,
+  disableFinish = false,
   onStart,
   onStop,
   onFinish,
   onSubmitText,
 }) {
   const [typedInput, setTypedInput] = useState('');
-  const canSendTypedMessage = typedInput.trim().length > 0 && !isThinking;
+  const canSendTypedMessage = typedInput.trim().length > 0 && !isThinking && !disabled;
 
   const handleTypedSubmit = (event) => {
     event.preventDefault();
     const trimmedInput = typedInput.trim();
-    if (!trimmedInput || isThinking) {
+    if (!trimmedInput || isThinking || disabled) {
       return;
     }
 
@@ -69,7 +71,7 @@ export default function VoiceBar({
       <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
         <button
           onClick={isListening ? onStop : onStart}
-          disabled={isThinking && !isListening}
+          disabled={disabled || (isThinking && !isListening)}
           style={{
             flex: 1,
             padding: '12px 0',
@@ -79,9 +81,9 @@ export default function VoiceBar({
             borderRadius: 8,
             fontWeight: 700,
             fontSize: 14,
-            cursor: isThinking && !isListening ? 'not-allowed' : 'pointer',
+            cursor: disabled || (isThinking && !isListening) ? 'not-allowed' : 'pointer',
             transition: 'background 0.15s',
-            opacity: isThinking && !isListening ? 0.6 : 1,
+            opacity: disabled || (isThinking && !isListening) ? 0.6 : 1,
           }}
         >
           {isListening ? 'Stop talking' : 'Start talking'}
@@ -89,6 +91,7 @@ export default function VoiceBar({
 
         <button
           onClick={onFinish}
+          disabled={disableFinish}
           style={{
             padding: '12px 20px',
             background: 'transparent',
@@ -96,8 +99,9 @@ export default function VoiceBar({
             border: '1px solid #333',
             borderRadius: 8,
             fontSize: 14,
-            cursor: 'pointer',
+            cursor: disableFinish ? 'not-allowed' : 'pointer',
             fontFamily: 'sans-serif',
+            opacity: disableFinish ? 0.6 : 1,
           }}
         >
           I'm done
@@ -109,6 +113,7 @@ export default function VoiceBar({
           type="text"
           value={typedInput}
           onChange={(event) => setTypedInput(event.target.value)}
+          disabled={disabled}
           placeholder="Text fallback if the mic fails..."
           style={{
             flex: 1,

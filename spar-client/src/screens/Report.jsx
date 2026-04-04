@@ -1,37 +1,128 @@
+function formatDuration(seconds) {
+  const safeSeconds = Number.isFinite(seconds) ? seconds : 0;
+  const mins = Math.floor(safeSeconds / 60);
+  const secs = safeSeconds % 60;
+  return `${mins}m ${secs}s`;
+}
+
+function formatTimeToFirstEdit(seconds) {
+  if (!Number.isFinite(seconds)) {
+    return 'No edit recorded';
+  }
+
+  return `${seconds}s to first edit`;
+}
+
+function getVerdictColor(verdict) {
+  if (verdict === 'Strong Hire') {
+    return '#3ddc84';
+  }
+
+  if (verdict === 'Hire' || verdict === 'Leaning Hire') {
+    return '#5b9cf6';
+  }
+
+  return '#ff8c6b';
+}
+
 export default function Report({ report, scenario, onRetry }) {
-  const scores = generateScores(report);
+  const dimensions = Array.isArray(report?.dimensions) ? report.dimensions : [];
+  const meta = report?.sessionMeta || {};
+  const verdictColor = getVerdictColor(report?.verdict);
 
   return (
     <div style={{
-      minHeight: '100vh', background: '#0a0a0b', color: '#f0f0f0',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'sans-serif', padding: 40,
+      minHeight: '100vh',
+      background: '#0a0a0b',
+      color: '#f0f0f0',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontFamily: 'sans-serif',
+      padding: 40,
     }}>
-      <div style={{ maxWidth: 640, width: '100%' }}>
+      <div style={{ maxWidth: 760, width: '100%' }}>
         <div style={{ fontSize: 12, color: '#ff5c35', fontWeight: 700, letterSpacing: '0.2em', marginBottom: 8 }}>
           SPAR — SESSION COMPLETE
         </div>
         <h1 style={{ fontSize: 36, fontWeight: 800, marginBottom: 8 }}>Your Report</h1>
-        <p style={{ color: '#555', marginBottom: 40 }}>
-          {scenario.title} · {Math.floor(report.duration / 60)}m {report.duration % 60}s
+        <p style={{ color: '#555', marginBottom: 28 }}>
+          {scenario.title} · {formatDuration(meta.durationSeconds)}
         </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 40 }}>
-          {scores.map(score => <ScoreRow key={score.label} {...score} />)}
+        <div style={{
+          background: '#111',
+          border: '1px solid #222',
+          borderRadius: 14,
+          padding: 24,
+          marginBottom: 24,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 12, color: '#666', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>
+                Final Verdict
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: verdictColor }}>
+                {report?.verdict || 'Pending'}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <MetaPill label={`${meta.filesOpened || 0} files opened`} />
+              <MetaPill label={`${meta.utteranceCount || 0} utterances`} />
+              <MetaPill label={formatTimeToFirstEdit(meta.timeToFirstEditSeconds)} />
+            </div>
+          </div>
+
+          <p style={{ color: '#ccc', lineHeight: 1.7, margin: 0 }}>
+            {report?.verdictSummary}
+          </p>
         </div>
 
-        <div style={{ background: '#111', border: '1px solid #222', borderRadius: 12, padding: 24, marginBottom: 32 }}>
-          <div style={{ fontSize: 12, color: '#555', fontWeight: 700, letterSpacing: '0.15em', marginBottom: 12 }}>
-            THE BUG
+        <div style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
+          {dimensions.map((dimension) => (
+            <ScoreRow
+              key={dimension.key}
+              label={dimension.label}
+              score={dimension.score}
+              maxScore={dimension.maxScore}
+              summary={dimension.summary}
+            />
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, marginBottom: 32 }}>
+          <div style={{ background: '#111', border: '1px solid #222', borderRadius: 12, padding: 24 }}>
+            <div style={{ fontSize: 12, color: '#555', fontWeight: 700, letterSpacing: '0.15em', marginBottom: 12 }}>
+              WHAT TO WORK ON NEXT
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {(report?.nextSteps || []).map((step) => (
+                <div key={step} style={{ color: '#ccc', lineHeight: 1.6 }}>
+                  - {step}
+                </div>
+              ))}
+            </div>
           </div>
-          <p style={{ color: '#ccc', lineHeight: 1.6 }}>{scenario.bugExplanation}</p>
-          <div style={{ marginTop: 16, fontSize: 13, color: '#ff5c35' }}>Fix: {scenario.fixSummary}</div>
+
+          <div style={{ background: '#111', border: '1px solid #222', borderRadius: 12, padding: 24 }}>
+            <div style={{ fontSize: 12, color: '#555', fontWeight: 700, letterSpacing: '0.15em', marginBottom: 12 }}>
+              THE BUG
+            </div>
+            <p style={{ color: '#ccc', lineHeight: 1.6, marginTop: 0 }}>{scenario.bugExplanation}</p>
+            <div style={{ marginTop: 16, fontSize: 13, color: '#ff5c35' }}>Fix: {scenario.fixSummary}</div>
+          </div>
         </div>
 
         <button onClick={onRetry} style={{
-          background: 'transparent', color: '#555', border: '1px solid #333',
-          padding: '12px 28px', borderRadius: 8, cursor: 'pointer',
-          fontFamily: 'sans-serif', fontSize: 14,
+          background: 'transparent',
+          color: '#555',
+          border: '1px solid #333',
+          padding: '12px 28px',
+          borderRadius: 8,
+          cursor: 'pointer',
+          fontFamily: 'sans-serif',
+          fontSize: 14,
         }}>
           ← Try again
         </button>
@@ -40,44 +131,37 @@ export default function Report({ report, scenario, onRetry }) {
   );
 }
 
-function ScoreRow({ label, score, max, description, color }) {
-  const pct = Math.round((score / max) * 100);
+function MetaPill({ label }) {
   return (
-    <div style={{ background: '#111', border: '1px solid #222', borderRadius: 10, padding: '16px 20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ fontWeight: 600, fontSize: 15 }}>{label}</span>
-        <span style={{ color, fontWeight: 700 }}>{pct}%</span>
-      </div>
-      <div style={{ background: '#1e1e1e', borderRadius: 4, height: 6, marginBottom: 10 }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4 }} />
-      </div>
-      <p style={{ fontSize: 13, color: '#666', margin: 0 }}>{description}</p>
+    <div style={{
+      padding: '8px 12px',
+      borderRadius: 999,
+      border: '1px solid #2a2a2a',
+      color: '#888',
+      fontSize: 12,
+      background: '#0d0d0e',
+    }}>
+      {label}
     </div>
   );
 }
 
-function generateScores(report) {
-  const readPct = report.timeToFirstEdit ? Math.min(report.timeToFirstEdit / 120, 1) : 0;
-  const readScore = report.readBeforeEdit ? 5 : 2;
+function ScoreRow({ label, score = 0, maxScore = 10, summary }) {
+  const pct = Math.round((score / maxScore) * 100);
+  const color = pct >= 80 ? '#3ddc84' : pct >= 60 ? '#5b9cf6' : pct >= 40 ? '#f5a623' : '#ff8c6b';
 
-  return [
-    {
-      label: 'Code reading', score: Math.round(readPct * 5 + readScore), max: 10, color: '#3ddc84',
-      description: report.readBeforeEdit
-        ? `You spent time reading before editing — good signal. First edit at ${report.timeToFirstEdit}s.`
-        : 'You jumped to editing quickly. Interviewers want to see you understand the codebase first.'
-    },
-    {
-      label: 'Communication', score: Math.min(report.utteranceCount, 10), max: 10, color: '#5b9cf6',
-      description: `You made ${report.utteranceCount} verbal statements. Strong candidates narrate every thought — including dead ends.`
-    },
-    {
-      label: 'Exploration', score: Math.min(report.filesViewed, 4), max: 4, color: '#f5a623',
-      description: `You opened ${report.filesViewed} file${report.filesViewed !== 1 ? 's' : ''}. Good debugging means tracing the full request path before assuming you know where the bug is.`
-    },
-    {
-      label: 'Engagement', score: Math.min(report.aiMessagesReceived, 10), max: 10, color: '#ff5c35',
-      description: `You responded to ${report.aiMessagesReceived} interviewer questions. The best candidates treat the interviewer as a collaborator, not an obstacle.`
-    }
-  ];
+  return (
+    <div style={{ background: '#111', border: '1px solid #222', borderRadius: 12, padding: '18px 20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontWeight: 600, fontSize: 15 }}>{label}</span>
+        <span style={{ color, fontWeight: 700 }}>
+          {score}/{maxScore}
+        </span>
+      </div>
+      <div style={{ background: '#1e1e1e', borderRadius: 4, height: 6, marginBottom: 12 }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4 }} />
+      </div>
+      <p style={{ fontSize: 13, color: '#999', margin: 0, lineHeight: 1.6 }}>{summary}</p>
+    </div>
+  );
 }
