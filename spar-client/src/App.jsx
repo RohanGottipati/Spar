@@ -28,6 +28,7 @@ export default function App() {
           setSelectedDifficulty(difficulty);
           setScreen('scenario');
         }}
+        onBack={() => setScreen('landing')}
       />
     );
   }

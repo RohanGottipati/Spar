@@ -24,7 +24,7 @@ const DIFFICULTIES = [
   },
 ];
 
-export default function DifficultySelect({ scenarios, onSelect }) {
+export default function DifficultySelect({ scenarios, onSelect, onBack }) {
   const [hovered, setHovered] = useState(null);
 
   const countFor = (value) => scenarios.filter(s => s.difficulty === value).length;
@@ -93,6 +93,19 @@ export default function DifficultySelect({ scenarios, onSelect }) {
           );
         })}
       </div>
+
+      {onBack && (
+        <button
+          onClick={onBack}
+          style={{
+            marginTop: 40, background: 'transparent', color: '#555',
+            border: '1px solid #333', padding: '10px 24px', borderRadius: 8,
+            cursor: 'pointer', fontFamily: 'sans-serif', fontSize: 14,
+          }}
+        >
+          ← Back
+        </button>
+      )}
     </div>
   );
 }
