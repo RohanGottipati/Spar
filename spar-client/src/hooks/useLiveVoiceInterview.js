@@ -117,6 +117,22 @@ async function createCaptureGraph(stream, onAudioChunk) {
   };
 }
 
+async function closeAudioContextSafely(audioContext, label) {
+  if (!audioContext || audioContext.state === 'closed') {
+    return;
+  }
+
+  try {
+    await audioContext.close();
+  } catch (err) {
+    if (err?.name === 'InvalidStateError') {
+      return;
+    }
+
+    console.error(`${label} audio context close failed:`, err);
+  }
+}
+
 export function useLiveVoiceInterview(
   scenario,
   {
@@ -352,15 +368,11 @@ export function useLiveVoiceInterview(
     playbackNextTimeRef.current = 0;
     setIsAgentSpeaking(false);
 
-    if (dispose && playbackContextRef.current) {
-      try {
-        await playbackContextRef.current.close();
-      } catch (err) {
-        console.error('Assistant audio context close failed:', err);
-      }
-
+    if (dispose) {
+      const playbackContext = playbackContextRef.current;
       playbackContextRef.current = null;
       playbackGainNodeRef.current = null;
+      await closeAudioContextSafely(playbackContext, 'Assistant');
     }
   }, []);
 
@@ -460,13 +472,7 @@ export function useLiveVoiceInterview(
 
     activeCapture?.stream?.getTracks().forEach((track) => track.stop());
 
-    if (activeCapture?.audioContext) {
-      try {
-        await activeCapture.audioContext.close();
-      } catch (err) {
-        console.error('Capture audio context close failed:', err);
-      }
-    }
+    await closeAudioContextSafely(activeCapture?.audioContext, 'Capture');
 
     setIsListening(false);
     if (clearTranscript) {
@@ -538,7 +544,7 @@ export function useLiveVoiceInterview(
 
       if (captureRequestIdRef.current !== requestId) {
         nextCapture.stream.getTracks().forEach((track) => track.stop());
-        await nextCapture.audioContext.close();
+        await closeAudioContextSafely(nextCapture.audioContext, 'Capture');
         return;
       }
 

@@ -29,23 +29,46 @@ class MonacoErrorBoundary extends Component {
   }
 }
 
-function MonacoLoadingFallback({ onTimeout }) {
+function MonacoLoadingFallback({ onUsePlainEditor }) {
+  const [canUsePlainEditor, setCanUsePlainEditor] = useState(false);
+
   useEffect(() => {
-    const timeoutId = window.setTimeout(onTimeout, 3500);
+    const timeoutId = window.setTimeout(() => {
+      setCanUsePlainEditor(true);
+    }, 3500);
+
     return () => window.clearTimeout(timeoutId);
-  }, [onTimeout]);
+  }, []);
 
   return (
     <div style={{
       height: '100%',
       display: 'flex',
+      flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      color: '#666',
+      gap: 14,
+      color: '#777',
       fontSize: 14,
       background: '#111',
     }}>
-      Loading editor...
+      <div>Loading editor...</div>
+      {canUsePlainEditor && (
+        <button
+          onClick={onUsePlainEditor}
+          style={{
+            background: 'transparent',
+            color: '#aaa',
+            border: '1px solid #333',
+            padding: '10px 14px',
+            borderRadius: 8,
+            cursor: 'pointer',
+            fontSize: 12,
+          }}
+        >
+          Use plain text editor
+        </button>
+      )}
     </div>
   );
 }
@@ -291,7 +314,7 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
                 theme="vs-dark"
                 value={fileContents[activeFile] ?? ''}
                 onMount={handleMonacoMount}
-                loading={<MonacoLoadingFallback onTimeout={() => setUsePlainEditor(true)} />}
+                loading={<MonacoLoadingFallback onUsePlainEditor={() => setUsePlainEditor(true)} />}
                 options={{
                   fontSize: 14,
                   minimap: { enabled: false },

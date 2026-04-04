@@ -4,6 +4,18 @@ const REPORT_DIMENSIONS = {
   interviewer_dynamic: 'Interviewer Dynamic',
   bug_fix_quality: 'Bug Fix Quality',
 };
+const REPORT_DIMENSION_KEYS = Object.keys(REPORT_DIMENSIONS);
+const DEFAULT_NEXT_STEPS_BY_DIMENSION = {
+  code_behavior: 'Make each debugging step explicit: inspect the code path, state a hypothesis, then validate it before editing.',
+  communication_quality: 'Narrate concrete evidence and expected outcomes so your reasoning is easy to follow.',
+  interviewer_dynamic: 'Answer the interviewer directly, then connect your response back to the code and production impact.',
+  bug_fix_quality: 'Close the loop on root cause, regression risk, and the test you would add after the fix.',
+};
+const GENERIC_ANALYSIS_FAILURE_STRINGS = new Set([
+  'structured analysis failed.',
+  'structured analysis was incomplete.',
+  'the analysis agent did not return structured output.',
+]);
 
 function clampScore(value) {
   if (!Number.isFinite(value)) {
@@ -11,6 +23,10 @@ function clampScore(value) {
   }
 
   return Math.max(0, Math.min(10, Math.round(value)));
+}
+
+function normalizeShortText(value) {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function toSeconds(timestamp) {
@@ -190,6 +206,7 @@ function sanitizeAnalyzerOutput(kind, rawText) {
       concerns: ['Structured analysis failed.'],
       evidence: [],
       rawText: typeof rawText === 'string' ? rawText : '',
+      usedFallback: true,
     };
   }
 
@@ -205,6 +222,48 @@ function sanitizeAnalyzerOutput(kind, rawText) {
     concerns: Array.isArray(parsed.concerns) ? parsed.concerns.filter(Boolean).slice(0, 3) : [],
     evidence: Array.isArray(parsed.evidence) ? parsed.evidence.filter(Boolean).slice(0, 3) : [],
     rawText: typeof rawText === 'string' ? rawText : '',
+    usedFallback: false,
+  };
+}
+
+function buildUniqueNextSteps(candidates) {
+  const nextSteps = [];
+  const seen = new Set();
+
+  candidates.forEach((candidate) => {
+    const normalized = normalizeShortText(candidate);
+    if (!normalized) {
+      return;
+    }
+
+    const dedupeKey = normalized.toLowerCase();
+    if (GENERIC_ANALYSIS_FAILURE_STRINGS.has(dedupeKey) || seen.has(dedupeKey)) {
+      return;
+    }
+
+    seen.add(dedupeKey);
+    nextSteps.push(normalized);
+  });
+
+  return nextSteps;
+}
+
+function buildFallbackNextSteps(analyses) {
+  const concernSuggestions = REPORT_DIMENSION_KEYS
+    .map((key) => analyses[key]?.concerns?.[0] || '')
+    .filter(Boolean);
+  const defaultSuggestions = REPORT_DIMENSION_KEYS.map((key) => DEFAULT_NEXT_STEPS_BY_DIMENSION[key]);
+
+  return buildUniqueNextSteps([...concernSuggestions, ...defaultSuggestions]).slice(0, 3);
+}
+
+function buildAnalysisStatus(analyses, { usedFallbackSynthesis = false } = {}) {
+  const failedDimensions = REPORT_DIMENSION_KEYS.filter((key) => analyses[key]?.usedFallback);
+
+  return {
+    degraded: failedDimensions.length > 0 || usedFallbackSynthesis,
+    failedDimensions,
+    usedFallbackSynthesis: Boolean(usedFallbackSynthesis),
   };
 }
 
@@ -276,28 +335,20 @@ function buildFallbackReport({ dossier, analyses }) {
 
   const average = dimensions.reduce((total, dimension) => total + dimension.score, 0) / dimensions.length;
   const verdict = deriveVerdictFromAverage(average);
-  const nextStepsPool = [
-    analyses.code_behavior?.concerns?.[0],
-    analyses.communication_quality?.concerns?.[0],
-    analyses.interviewer_dynamic?.concerns?.[0],
-    analyses.bug_fix_quality?.concerns?.[0],
-  ].filter(Boolean);
-
-  while (nextStepsPool.length < 3) {
-    nextStepsPool.push('Keep narrating your hypotheses and validate each one before editing the code.');
-  }
+  const nextSteps = buildFallbackNextSteps(analyses);
 
   return {
     dimensions,
     verdict,
     verdictSummary: `You showed a ${verdict.toLowerCase()} level performance overall. The strongest signal came from ${dimensions.slice().sort((a, b) => b.score - a.score)[0].label.toLowerCase()}, while the biggest gap was ${dimensions.slice().sort((a, b) => a.score - b.score)[0].label.toLowerCase()}.`,
-    nextSteps: nextStepsPool.slice(0, 3),
+    nextSteps,
     sessionMeta: {
       durationSeconds: dossier.derived.durationSeconds,
       timeToFirstEditSeconds: dossier.derived.timeToFirstEditSeconds,
       filesOpened: dossier.derived.filesOpened,
       utteranceCount: dossier.derived.utteranceCount,
     },
+    analysisStatus: buildAnalysisStatus(analyses, { usedFallbackSynthesis: true }),
   };
 }
 
@@ -320,13 +371,11 @@ function sanitizeFinalReport(rawText, dossier, analyses) {
   const verdict = typeof parsed.verdict === 'string' && parsed.verdict.trim()
     ? parsed.verdict.trim()
     : deriveVerdictFromAverage(average);
-  const nextSteps = Array.isArray(parsed.nextSteps)
-    ? parsed.nextSteps.filter((step) => typeof step === 'string' && step.trim()).slice(0, 3)
-    : [];
-
-  while (nextSteps.length < 3) {
-    nextSteps.push('Keep your debugging loop explicit: hypothesis, evidence, edit, validation.');
-  }
+  const nextSteps = buildUniqueNextSteps(Array.isArray(parsed.nextSteps) ? parsed.nextSteps : []);
+  const mergedNextSteps = buildUniqueNextSteps([
+    ...nextSteps,
+    ...buildFallbackNextSteps(analyses),
+  ]).slice(0, 3);
 
   return {
     dimensions,
@@ -334,13 +383,14 @@ function sanitizeFinalReport(rawText, dossier, analyses) {
     verdictSummary: typeof parsed.verdictSummary === 'string' && parsed.verdictSummary.trim()
       ? parsed.verdictSummary.trim()
       : buildFallbackReport({ dossier, analyses }).verdictSummary,
-    nextSteps,
+    nextSteps: mergedNextSteps,
     sessionMeta: {
       durationSeconds: dossier.derived.durationSeconds,
       timeToFirstEditSeconds: dossier.derived.timeToFirstEditSeconds,
       filesOpened: dossier.derived.filesOpened,
       utteranceCount: dossier.derived.utteranceCount,
     },
+    analysisStatus: buildAnalysisStatus(analyses),
   };
 }
 

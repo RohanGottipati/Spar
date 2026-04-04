@@ -98,6 +98,14 @@ function createId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function truncateForLog(value, limit = 500) {
+  try {
+    return JSON.stringify(value).slice(0, limit);
+  } catch (_err) {
+    return String(value).slice(0, limit);
+  }
+}
+
 function buildOpeningMessage(scenario) {
   return `Let's start. You're debugging this issue: ${scenario.description} Walk me through where you would begin and what evidence you want first.`;
 }
@@ -616,6 +624,15 @@ async function runAssistantThread({ assistantId, content, provider, model, metad
 
   const reply = extractContent(response);
   if (!reply) {
+    const topLevelKeys = response && typeof response === 'object' && !Array.isArray(response)
+      ? Object.keys(response)
+      : [];
+    console.error('Backboard assistant response was empty:', {
+      assistantId,
+      threadId,
+      topLevelKeys,
+      payloadSample: truncateForLog(response),
+    });
     throw new Error('Backboard assistant response was empty');
   }
 

@@ -75,24 +75,98 @@ function stringifyMetadata(metadata) {
   return typeof metadata === 'string' ? metadata : JSON.stringify(metadata);
 }
 
-function extractContent(data) {
-  if (typeof data?.content === 'string' && data.content.trim()) {
-    return data.content.trim();
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function joinExtractedValues(values, visited, depth) {
+  if (!Array.isArray(values) || !values.length) {
+    return '';
   }
 
-  if (typeof data?.message === 'string' && data.message.trim()) {
-    return data.message.trim();
+  const parts = values
+    .map((value) => extractContent(value, visited, depth + 1))
+    .filter(Boolean);
+
+  return parts.join('\n').trim();
+}
+
+function extractContent(data, visited = new WeakSet(), depth = 0) {
+  if (depth > 6 || data == null) {
+    return '';
+  }
+
+  if (typeof data === 'string') {
+    return data.trim();
+  }
+
+  if (Array.isArray(data)) {
+    return joinExtractedValues(data, visited, depth);
+  }
+
+  if (typeof data !== 'object') {
+    return '';
+  }
+
+  if (visited.has(data)) {
+    return '';
+  }
+  visited.add(data);
+
+  const directText = [
+    normalizeText(data.content),
+    normalizeText(data.message),
+    normalizeText(data.output_text),
+    normalizeText(data.text),
+    normalizeText(data.text?.value),
+  ].find(Boolean);
+
+  if (directText) {
+    return directText;
   }
 
   if (Array.isArray(data?.content)) {
     const joined = data.content
-      .map((part) => part?.text?.value || part?.text || part?.content || '')
+      .map((part) => (
+        normalizeText(part?.text?.value)
+        || normalizeText(part?.text)
+        || normalizeText(part?.content)
+        || extractContent(part, visited, depth + 1)
+      ))
       .filter(Boolean)
       .join('\n')
       .trim();
 
     if (joined) {
       return joined;
+    }
+  }
+
+  const nestedKeys = [
+    'content',
+    'message',
+    'text',
+    'data',
+    'result',
+    'response',
+    'assistant',
+    'completion',
+    'output',
+    'item',
+  ];
+
+  for (const key of nestedKeys) {
+    const extracted = extractContent(data?.[key], visited, depth + 1);
+    if (extracted) {
+      return extracted;
+    }
+  }
+
+  const collectionKeys = ['messages', 'outputs', 'choices', 'items', 'parts', 'results'];
+  for (const key of collectionKeys) {
+    const extracted = joinExtractedValues(data?.[key], visited, depth);
+    if (extracted) {
+      return extracted;
     }
   }
 

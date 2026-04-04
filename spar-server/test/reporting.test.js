@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  buildFallbackReport,
   buildReportDossier,
   sanitizeAnalyzerOutput,
   sanitizeFinalReport,
@@ -121,4 +122,99 @@ test('sanitizeFinalReport falls back to analyzer output when synthesis JSON is i
   assert.equal(report.dimensions[0].score, 7);
   assert.equal(report.nextSteps.length, 3);
   assert.ok(typeof report.verdict === 'string' && report.verdict.length > 0);
+  assert.equal(report.analysisStatus.degraded, true);
+  assert.equal(report.analysisStatus.usedFallbackSynthesis, true);
+});
+
+test('buildFallbackReport deduplicates generic next steps and reports degraded dimensions', () => {
+  const dossier = buildReportDossier({
+    scenario: createScenario(),
+    tracker: {
+      startedAt: 1_000,
+      finishedAt: 11_000,
+      fileOpens: [{ file: 'routes/orders.js', ts: 1_000 }],
+      editorEvents: [],
+      utterances: [],
+      chatHistory: [],
+      finalFiles: {},
+    },
+  });
+
+  const analyses = {
+    code_behavior: sanitizeAnalyzerOutput('code_behavior', 'invalid json'),
+    communication_quality: sanitizeAnalyzerOutput('communication_quality', 'invalid json'),
+    interviewer_dynamic: sanitizeAnalyzerOutput('interviewer_dynamic', 'invalid json'),
+    bug_fix_quality: sanitizeAnalyzerOutput('bug_fix_quality', 'invalid json'),
+  };
+
+  const report = buildFallbackReport({ dossier, analyses });
+
+  assert.equal(report.nextSteps.length, 3);
+  assert.equal(new Set(report.nextSteps).size, 3);
+  assert.equal(report.nextSteps.includes('Structured analysis failed.'), false);
+  assert.deepEqual(report.analysisStatus.failedDimensions, [
+    'code_behavior',
+    'communication_quality',
+    'interviewer_dynamic',
+    'bug_fix_quality',
+  ]);
+  assert.equal(report.analysisStatus.usedFallbackSynthesis, true);
+});
+
+test('sanitizeFinalReport preserves degraded analyzer status even when synthesis succeeds', () => {
+  const dossier = buildReportDossier({
+    scenario: createScenario(),
+    tracker: {
+      startedAt: 1_000,
+      finishedAt: 11_000,
+      fileOpens: [{ file: 'routes/orders.js', ts: 1_000 }],
+      editorEvents: [],
+      utterances: [],
+      chatHistory: [],
+      finalFiles: {},
+    },
+  });
+
+  const analyses = {
+    code_behavior: sanitizeAnalyzerOutput('code_behavior', 'invalid json'),
+    communication_quality: sanitizeAnalyzerOutput('communication_quality', JSON.stringify({
+      score: 6,
+      summary: 'Clear enough communication.',
+      strengths: ['Explained one hypothesis'],
+      concerns: ['Needed more precision'],
+      evidence: ['Short but clear answers'],
+    })),
+    interviewer_dynamic: sanitizeAnalyzerOutput('interviewer_dynamic', JSON.stringify({
+      score: 5,
+      summary: 'Handled prompts without much depth.',
+      strengths: ['Responded directly'],
+      concerns: ['Could challenge assumptions more explicitly'],
+      evidence: ['Short follow-up answers'],
+    })),
+    bug_fix_quality: sanitizeAnalyzerOutput('bug_fix_quality', JSON.stringify({
+      score: 8,
+      summary: 'The fix addresses the root cause.',
+      strengths: ['Removed the retry path'],
+      concerns: ['Should add a regression test'],
+      evidence: ['Final code removed the duplicate order flow'],
+    })),
+  };
+
+  const report = sanitizeFinalReport(JSON.stringify({
+    verdict: 'Hire',
+    verdictSummary: 'Solid debugging overall.',
+    nextSteps: ['Structured analysis failed.', 'Should add a regression test', 'Should add a regression test'],
+    dimensions: [
+      { label: 'Code Behavior', score: 0, summary: 'Fallback' },
+      { label: 'Communication Quality', score: 6, summary: 'Clear enough communication.' },
+      { label: 'Interviewer Dynamic', score: 5, summary: 'Handled prompts without much depth.' },
+      { label: 'Bug Fix Quality', score: 8, summary: 'The fix addresses the root cause.' },
+    ],
+  }), dossier, analyses);
+
+  assert.equal(report.analysisStatus.degraded, true);
+  assert.equal(report.analysisStatus.usedFallbackSynthesis, false);
+  assert.deepEqual(report.analysisStatus.failedDimensions, ['code_behavior']);
+  assert.equal(report.nextSteps.length, 3);
+  assert.equal(new Set(report.nextSteps).size, 3);
 });

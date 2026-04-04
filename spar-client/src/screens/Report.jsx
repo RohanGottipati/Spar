@@ -25,11 +25,47 @@ function getVerdictColor(verdict) {
   return '#ff8c6b';
 }
 
+const REPORT_DIMENSION_LABELS = {
+  code_behavior: 'Code Behavior',
+  communication_quality: 'Communication Quality',
+  interviewer_dynamic: 'Interviewer Dynamic',
+  bug_fix_quality: 'Bug Fix Quality',
+};
+
+function buildDegradedAnalysisSummary(report) {
+  const analysisStatus = report?.analysisStatus;
+  if (!analysisStatus?.degraded) {
+    return '';
+  }
+
+  const dimensionLabels = new Map(
+    (Array.isArray(report?.dimensions) ? report.dimensions : []).map((dimension) => [dimension.key, dimension.label])
+  );
+  const failedLabels = (Array.isArray(analysisStatus.failedDimensions) ? analysisStatus.failedDimensions : [])
+    .map((key) => dimensionLabels.get(key) || REPORT_DIMENSION_LABELS[key] || key)
+    .filter(Boolean);
+
+  if (failedLabels.length && analysisStatus.usedFallbackSynthesis) {
+    return `Some AI analysis degraded for ${failedLabels.join(', ')}, and Spar used a fallback summary for the final report.`;
+  }
+
+  if (failedLabels.length) {
+    return `Some AI analysis degraded for ${failedLabels.join(', ')}, so parts of this report use fallback scoring text.`;
+  }
+
+  if (analysisStatus.usedFallbackSynthesis) {
+    return 'The final AI synthesis degraded, so Spar used a fallback summary for this report.';
+  }
+
+  return '';
+}
+
 export default function Report({ report, scenario, onRetry }) {
   const dimensions = Array.isArray(report?.dimensions) ? report.dimensions : [];
   const meta = report?.sessionMeta || {};
   const scenarioSummary = report?.scenarioSummary || {};
   const verdictColor = getVerdictColor(report?.verdict);
+  const degradedAnalysisSummary = buildDegradedAnalysisSummary(report);
 
   return (
     <div style={{
@@ -50,6 +86,23 @@ export default function Report({ report, scenario, onRetry }) {
         <p style={{ color: '#555', marginBottom: 28 }}>
           {(scenarioSummary.title || scenario.title)} · {formatDuration(meta.durationSeconds)}
         </p>
+
+        {degradedAnalysisSummary && (
+          <div style={{
+            background: '#151211',
+            border: '1px solid #3a2a25',
+            borderRadius: 12,
+            padding: '16px 18px',
+            marginBottom: 18,
+          }}>
+            <div style={{ fontSize: 12, color: '#ff8c6b', fontWeight: 700, letterSpacing: '0.12em', marginBottom: 8 }}>
+              PARTIAL ANALYSIS
+            </div>
+            <p style={{ color: '#d4c2bd', lineHeight: 1.6, margin: 0 }}>
+              {degradedAnalysisSummary}
+            </p>
+          </div>
+        )}
 
         <div style={{
           background: '#111',
@@ -98,8 +151,8 @@ export default function Report({ report, scenario, onRetry }) {
               WHAT TO WORK ON NEXT
             </div>
             <div style={{ display: 'grid', gap: 10 }}>
-              {(report?.nextSteps || []).map((step) => (
-                <div key={step} style={{ color: '#ccc', lineHeight: 1.6 }}>
+              {(report?.nextSteps || []).map((step, index) => (
+                <div key={`${index}-${step}`} style={{ color: '#ccc', lineHeight: 1.6 }}>
                   - {step}
                 </div>
               ))}
