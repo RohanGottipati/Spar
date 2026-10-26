@@ -92,76 +92,6 @@ function formatDifficultyLabel(difficulty) {
   return difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
 }
 
-function getSessionStatus({
-  interviewerError,
-  isAgentSpeaking,
-  isThinking,
-  isListening,
-  connectionState,
-  isReady,
-}) {
-  if (interviewerError) {
-    return {
-      label: 'Attention',
-      detail: interviewerError,
-      color: '#ff8c6b',
-      background: 'rgba(255,140,107,0.16)',
-    };
-  }
-
-  if (isAgentSpeaking) {
-    return {
-      label: 'Interviewer Talking',
-      detail: 'Let the prompt finish, then answer with the evidence you see in the code.',
-      color: '#5b9cf6',
-      background: 'rgba(91,156,246,0.16)',
-    };
-  }
-
-  if (isThinking) {
-    return {
-      label: 'Interviewer Thinking',
-      detail: 'The system is evaluating your last answer before the next follow-up.',
-      color: '#5b9cf6',
-      background: 'rgba(91,156,246,0.16)',
-    };
-  }
-
-  if (isListening) {
-    return {
-      label: 'Listening',
-      detail: 'Talk through your next debugging step while you inspect the codebase.',
-      color: '#3ddc84',
-      background: 'rgba(61,220,132,0.16)',
-    };
-  }
-
-  if (connectionState === 'preparing' || connectionState === 'requesting-mic') {
-    return {
-      label: 'Connecting',
-      detail: 'The interviewer session is still warming up.',
-      color: '#f5a623',
-      background: 'rgba(245,166,35,0.16)',
-    };
-  }
-
-  if (isReady) {
-    return {
-      label: 'Ready',
-      detail: 'State your hypothesis first, then open the next file that will confirm or reject it.',
-      color: '#ff5c35',
-      background: 'rgba(255,92,53,0.16)',
-    };
-  }
-
-  return {
-    label: 'Standby',
-    detail: 'Waiting for the interviewer to become available.',
-    color: '#7a7c88',
-    background: 'rgba(122,124,136,0.16)',
-  };
-}
-
 export default function Interview({ scenario, onFinish, onBack, onScenarioUnavailable }) {
   const visibleFilesMap = getVisibleFilesMap(scenario);
   const visibleFiles = Object.keys(visibleFilesMap);
@@ -176,12 +106,14 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
   const activeFileRef = useRef(initialFile);
   const editorListenerRef = useRef(null);
   const dragRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(420);
   const tracker = useSessionTracker({ scenarioId: scenario.id, initialFile });
 
   const onDragStart = useCallback((e) => {
     dragRef.current = true;
+    setIsDragging(true);
     dragStartX.current = e.clientX;
     dragStartWidth.current = chatWidth;
 
@@ -192,6 +124,7 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
     };
     const onUp = () => {
       dragRef.current = false;
+      setIsDragging(false);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -344,18 +277,10 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
   );
 
   const interactionDisabled = isFinishing;
-  const sessionStatus = getSessionStatus({
-    interviewerError,
-    isAgentSpeaking,
-    isThinking,
-    isListening,
-    connectionState,
-    isReady,
-  });
   const difficultyLabel = formatDifficultyLabel(scenario.difficulty);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#08090d', color: '#f0f0f0', fontFamily: 'Inter, sans-serif', userSelect: dragRef.current ? 'none' : 'auto' }}>
+    <div style={{ display: 'flex', height: '100vh', background: '#08090d', color: '#f0f0f0', fontFamily: 'Inter, sans-serif', userSelect: isDragging ? 'none' : 'auto' }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'linear-gradient(180deg, #0b0c10 0%, #090a0e 100%)' }}>
         <div
           style={{
@@ -578,22 +503,6 @@ function MetaBadge({ label, value }) {
       </div>
     </div>
   );
-}
-
-function buildInfoChip(color, label) {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '7px 10px',
-    borderRadius: 999,
-    background: `${color}16`,
-    color,
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase',
-  };
 }
 
 function MessageBubble({ message }) {

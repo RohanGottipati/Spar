@@ -2,7 +2,7 @@ function normalizeBaseUrl(baseUrl) {
   return typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/$/, '') : '';
 }
 
-export function getConfiguredApiBaseUrl() {
+function getConfiguredApiBaseUrl() {
   return normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL);
 }
 
