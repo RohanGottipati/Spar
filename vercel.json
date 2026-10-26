@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npm ci --prefix spar-client",
+  "buildCommand": "npm run build --prefix spar-client",
+  "outputDirectory": "spar-client/dist"
+}

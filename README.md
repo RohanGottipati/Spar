@@ -29,7 +29,7 @@ spar-client/            React + Vite front end
   src/components/       Timer, VoiceBar
   src/hooks/            useLiveVoiceInterview (voice WebSocket), useSessionTracker
   src/workers/          AudioWorklet that captures 16 kHz PCM from the mic
-  src/lib/              API/WebSocket URL helpers, Monaco setup
+  src/lib/              API/WebSocket URL helpers, Monaco setup, report theme, demo report
   src/data/scenarios.js Scenario catalog (also read by the server)
 spar-server/            Express + WebSocket back end
   index.js              Routes, Deepgram proxy, report pipeline
@@ -100,6 +100,7 @@ In development, the Vite dev server proxies `/api` and `/deepgram` to `http://lo
 | Variable | Purpose |
 |---|---|
 | `VITE_API_BASE_URL` | Optional. Set this only when the API is on a different origin from the client. |
+| `VITE_CHECKOUT_BENCHMARK_REPORT` | Optional. Set to `true` to show a canned demo report for the Checkout Bug scenario instead of calling `POST /api/reports`. |
 
 ## Scripts
 
@@ -112,7 +113,6 @@ In development, the Vite dev server proxies `/api` and `/deepgram` to `http://lo
 | `spar-server` | `npm start` / `npm run dev` | Start the server (`node index.js`) |
 | `spar-server` | `npm test` | Run unit tests (`node --test`) |
 
-## Known issues
+## Deployment
 
-- `spar-client` does not build or run as committed. `src/screens/Report.jsx` and `src/screens/ReportLoading.jsx` import `src/lib/experienceTheme` and `src/lib/mockReports`, and neither file exists in the repository.
-- `npm run lint` in `spar-client` reports one `react-hooks/refs` error in `src/screens/Interview.jsx`.
+The root `vercel.json` builds the client on Vercel (`npm ci` and `npm run build` in `spar-client`, output `spar-client/dist`). Vercel serves only the static client. The Express/WebSocket server has to run on a host that supports long-lived WebSockets, and the Vercel project needs `VITE_API_BASE_URL` pointing at it.

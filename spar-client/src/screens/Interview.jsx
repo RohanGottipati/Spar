@@ -106,12 +106,14 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
   const activeFileRef = useRef(initialFile);
   const editorListenerRef = useRef(null);
   const dragRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(420);
   const tracker = useSessionTracker({ scenarioId: scenario.id, initialFile });
 
   const onDragStart = useCallback((e) => {
     dragRef.current = true;
+    setIsDragging(true);
     dragStartX.current = e.clientX;
     dragStartWidth.current = chatWidth;
 
@@ -122,6 +124,7 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
     };
     const onUp = () => {
       dragRef.current = false;
+      setIsDragging(false);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -277,7 +280,7 @@ export default function Interview({ scenario, onFinish, onBack, onScenarioUnavai
   const difficultyLabel = formatDifficultyLabel(scenario.difficulty);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#08090d', color: '#f0f0f0', fontFamily: 'Inter, sans-serif', userSelect: dragRef.current ? 'none' : 'auto' }}>
+    <div style={{ display: 'flex', height: '100vh', background: '#08090d', color: '#f0f0f0', fontFamily: 'Inter, sans-serif', userSelect: isDragging ? 'none' : 'auto' }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'linear-gradient(180deg, #0b0c10 0%, #090a0e 100%)' }}>
         <div
           style={{
