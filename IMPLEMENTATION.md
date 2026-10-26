@@ -1,5 +1,7 @@
 # Spar — Full Implementation Guide
 > AI-powered mock interview platform. Built in 7 hours. This document is your complete build spec.
+>
+> **Historical note:** this is the original hackathon plan. The shipped code has moved on: the live interviewer runs on the Deepgram Voice Agent API, reports come from Backboard assistants, and there are 15 scenarios across three difficulties. See [README.md](README.md) for the current setup.
 
 ---
 

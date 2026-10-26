@@ -103,7 +103,7 @@ function buildDefaultRegressionNet(scenarioSummary) {
   ];
 }
 
-function buildDefaultRiskReview({ scenarioSummary, meta, scenario, topDimension }) {
+function buildDefaultRiskReview({ meta, scenario, topDimension }) {
   return [
     {
       label: 'Bug Location',
@@ -162,7 +162,7 @@ export default function Report({ report, scenario, onRetry }) {
     : buildDefaultRegressionNet(scenarioSummary);
   const riskReview = Array.isArray(dashboard.preventedRisks) && dashboard.preventedRisks.length > 0
     ? dashboard.preventedRisks
-    : buildDefaultRiskReview({ scenarioSummary, meta, scenario, topDimension });
+    : buildDefaultRiskReview({ meta, scenario, topDimension });
 
   return (
     <div style={experiencePageStyle}>

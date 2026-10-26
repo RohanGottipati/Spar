@@ -89,7 +89,7 @@ export default function DifficultySelect({ scenarios, onSelect, onBack }) {
         <div style={{
           display: 'flex', gap: 16, width: '100%', maxWidth: 1080,
         }}>
-          {DIFFICULTIES.map(({ value, label, tagline, description, accentColor }, i) => {
+          {DIFFICULTIES.map(({ value, label, tagline, description, accentColor }) => {
             const count = countFor(value);
             const isHovered = hovered === value;
             const available = count > 0;
